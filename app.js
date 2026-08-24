@@ -700,6 +700,25 @@ function searchExercise(name){
 function escAttr(s){ return String(s).replace(/'/g, "\\'"); }
 function escHtml(s){ return String(s==null?'':s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
+// Turns each bullet line of a generated plan into: leading bullet marker (plain) + the exercise
+// name (tappable, searches Google) + the rest of the line (sets/reps/detail, plain). Headers and
+// plain prose lines pass through unchanged — only actual list items get linkified.
+function renderPlanWithSearchLinks(text){
+  if (!text) return '';
+  return text.split('\n').map(line => {
+    const bulletMatch = line.match(/^(\s*(?:[-*•]|\d+[.)])\s+)(.*)$/);
+    if (!bulletMatch) return escHtml(line);
+    const prefix = bulletMatch[1];
+    let rest = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
+    const sepMatch = rest.match(/^(.*?)(:|—|–|,| - )([\s\S]*)$/);
+    const namePart = (sepMatch ? sepMatch[1] : rest).trim();
+    const restPart = sepMatch ? sepMatch[2] + sepMatch[3] : '';
+    if (!namePart) return escHtml(prefix) + escHtml(rest);
+    const link = `<span class="ex-link" onclick="searchExercise('${escAttr(namePart)}')">${escHtml(namePart)}</span>`;
+    return escHtml(prefix) + link + escHtml(restPart);
+  }).join('\n');
+}
+
 App.render = function(){
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === App.ui.tab));
   const panel = document.getElementById('panels');
@@ -779,7 +798,8 @@ function renderToday(){
     </div>
     <button class="btn btn-primary" onclick="askClaude()" ${App.ui.planLoading?'disabled':''}>${App.ui.planLoading ? 'Thinking…' : "Get today's plan"}</button>
     ${App.ui.planError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.planError)}</p>` : ''}
-    ${App.ui.planText ? `<div class="plan-box">${escHtml(App.ui.planText)}</div>
+    ${App.ui.planText ? `<div class="plan-box">${renderPlanWithSearchLinks(App.ui.planText)}</div>
+    <p class="small muted" style="margin-top:6px;">Tap any exercise name to search it.</p>
     <div class="pillrow" style="margin-top:10px;">
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="openPlanAsText()">Open as text (new tab)</button>
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="savePlanAsImage()">Save as image</button>
@@ -951,6 +971,7 @@ function renderHistory(){
         ${e.failurePointsOther?`<p><b>Detail:</b> ${escHtml(e.failurePointsOther)}</p>`:''}
         ${e.pain&&e.pain!=='None'?`<p style="color:var(--red)"><b>Pain:</b> ${e.pain}</p>`:''}
         ${e.notes?`<p><b>Notes:</b> ${escHtml(e.notes)}</p>`:''}
+        ${e.plan?`<p style="margin-bottom:4px;"><b>Planned workout:</b>${e.planAdherence?' <span class="muted small">('+escHtml(e.planAdherence)+')</span>':''}</p><div class="plan-box" style="margin-top:0;">${renderPlanWithSearchLinks(e.plan)}</div>`:''}
         <button class="btn btn-ghost" style="width:auto;padding:8px 14px;margin-top:8px;" onclick="editEntry('${e.id}')">Edit this entry</button>
       </div>` : ''}
     </div>`).join('');
