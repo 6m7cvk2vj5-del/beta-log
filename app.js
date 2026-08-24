@@ -29,7 +29,7 @@ const RADAR_AXES = [
 
 // Your own workout structures and exercise pool — used for logging (what did I do) and the
 // weekly-guidelines check-in. These are guidelines to notice drift on, not requirements to hit.
-const WORKOUT_STYLES = ['Core Circuit','Leg Day','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout','General/Other'];
+const WORKOUT_STYLES = ['Core Circuit','Leg Day','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout','Stretch/Mobility','Cardio Circuit','General/Other'];
 const EXERCISE_LIBRARY = {
   'Core Circuit': ["Hanging leg lift","Oblique weighted arm dip","Sit-up to stand-up","Wheelbarrow","Oblique knee raise plank","Farmer walk","A-frame drop","Plank (elevated)","Plank (sideways walk)","Side plank with leg raise","Full-body focus plank","Kettlebell figure 8","Matrix lean back"],
   'Leg Day': ["Squat/deadlift","Catcher calf raises","Calf jumps","High stepping","Weighted box jumps","Bulgarian lunges","Hanging knee lifts","Wall sits","Multidirectional lunges","Core-to-toe side lunges"],
@@ -37,7 +37,19 @@ const EXERCISE_LIBRARY = {
   'TRX — Core': ["Body saw","Side plank with hip raise","Overhead squat"],
   'TRX — Shoulder': ["Clock press","T-Y-I deltoid series","Atomic pushups","T-spine rotation"],
   'Full Efficient Workout': ["Mountain mans (rope/pulley alternating lockouts)","Campus board lunges","Around-the-world pull-ups","Offset pull-ups","Box jumps","One-leg squats","Lunges with shoulder press","Step-ups onto box","Tucks","Bridges","Side elbow planks","Dip-bar leg raises","Superman pushups","Bicep/tricep work","Chest/upper work","Forearm plank","Dolphin pushups","One-arm planks","Toe touches","Scissor kicks"],
+  'Stretch/Mobility': ["Joint circles (ankles/hips/shoulders)","World's greatest stretch","Pigeon pose","Cat-cow + thread-the-needle","Hip flexor stretch","Hamstring stretch","Adductor stretch","Rotator cuff stretch","Chest/biceps doorway stretch","Thoracic spine rotation","Wrist mobility circles","Shoulder dislocates (band/stick)","Pec release (lacrosse ball)","90/90 hip switches"],
+  'Cardio Circuit': ["Jump rope","Rowing intervals","Stair sprints","Suicide sprints","Incline treadmill walk","Bike intervals","Burpees"],
   'General/Other': ["Finger hangs","Finger pull-ups","Hanging leg raises","Pistol squats","Suicide sprints","Finger planks","Raised-leg diamond pushups","Jumping lunges","Lateral pull-ups","Upside-down shoulder press","Tricep dips","Incline pushups","Chair ups","Stair jumps","Stair sprints","Front squats","Turkish getup","Straight-arm planks","Shoulder dislocates"],
+};
+// Which workout styles are worth surfacing for each session type — so picking "Cardio" doesn't
+// show you TRX options and picking "Core Workout" doesn't show you Upper Tabata.
+const TYPE_RELEVANT_STYLES = {
+  'Antagonist / Stabilizer': ['TRX — Shoulder','Upper Tabata','General/Other'],
+  'Strength': ['Upper Tabata','Full Efficient Workout','General/Other'],
+  'Cardio': ['Cardio Circuit','General/Other'],
+  'Core Workout': ['Core Circuit','TRX — Core','Full Efficient Workout'],
+  'Leg Workout': ['Leg Day','Full Efficient Workout'],
+  'Mobility / Stretch': ['Stretch/Mobility'],
 };
 
 // Titles only, from your two physical books — enough to point you at the right page, not a
@@ -360,8 +372,8 @@ function computeWeeklyGuidelines(entries){
 }
 
 function renderRadarSVG(data, size){
-  size = size || 220;
-  const cx = size/2, cy = size/2, r = size/2 - 34;
+  size = size || 300; // internal coordinate space; actual rendered size is responsive via CSS below
+  const cx = size/2, cy = size/2, r = size/2 - 58;
   const n = data.length;
   const angle = i => (Math.PI*2*i/n) - Math.PI/2;
   const pt = (i, frac) => [cx + r*frac*Math.cos(angle(i)), cy + r*frac*Math.sin(angle(i))];
@@ -373,11 +385,11 @@ function renderRadarSVG(data, size){
   const dataPts = data.map((d,i)=> pt(i, Math.min(1, d.pct/100)).join(',')).join(' ');
   const targetPts = data.map((d,i)=> pt(i,1).join(',')).join(' ');
   const labels = data.map((d,i)=> {
-    const [x,y] = pt(i, 1.22);
+    const [x,y] = pt(i, 1.12);
     const anchor = Math.abs(Math.cos(angle(i))) < 0.3 ? 'middle' : (Math.cos(angle(i)) > 0 ? 'start' : 'end');
-    return `<text x="${x}" y="${y}" fill="var(--muted)" font-size="10.5" text-anchor="${anchor}" dominant-baseline="middle">${escHtml(d.axis)}</text>`;
+    return `<text x="${x}" y="${y}" fill="var(--muted)" font-size="9.5" text-anchor="${anchor}" dominant-baseline="middle">${escHtml(d.axis)}</text>`;
   }).join('');
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+  return `<svg viewBox="0 0 ${size} ${size}" style="width:100%;max-width:300px;height:auto;display:block;overflow:visible;">
     ${rings}${spokes}
     <polygon points="${targetPts}" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3,3"/>
     <polygon points="${dataPts}" fill="rgba(204,155,60,.35)" stroke="var(--gold)" stroke-width="2"/>
@@ -490,9 +502,24 @@ function clearPainFlag(){
 }
 
 // ---- Plan export / save-to-log (so a generated plan is never just stuck in memory) ----
-function openPlanAsText(){
+function openPlanAsPage(){
   if (!App.ui.planText) return;
-  const blob = new Blob([App.ui.planText], {type:'text/plain'});
+  const body = linkifyPlanToHTML(App.ui.planText);
+  const doc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Beta Log — ${todayISO()}</title>
+<style>
+  body{background:#17161B;color:#EEE9E1;font-family:-apple-system,BlinkMacSystemFont,'IBM Plex Sans',sans-serif;
+    max-width:600px;margin:0 auto;padding:24px 18px;line-height:1.6;white-space:pre-wrap;font-size:15px;}
+  h1{font-size:20px;color:#CC9B3C;margin-bottom:4px;}
+  p.sub{color:#948F87;font-size:13px;margin-top:0;margin-bottom:20px;}
+  a{color:#CC9B3C;text-decoration:underline;text-decoration-style:dotted;}
+  a:active{color:#4E8C87;}
+</style></head><body>
+<h1>Beta Log — Today's Plan</h1>
+<p class="sub">${todayISO()} &middot; tap any underlined exercise to search it</p>
+${body}
+</body></html>`;
+  const blob = new Blob([doc], {type:'text/html'});
   const url = URL.createObjectURL(blob);
   window.open(url, '_blank');
   setTimeout(() => URL.revokeObjectURL(url), 30000);
@@ -692,31 +719,47 @@ function pillsHTML(options, selected, onClick, opts){
     return `<button type="button" class="${cls}${isActive ? ' active'+altClass : ''}" onclick="${onClick}('${escAttr(o)}')">${o}${searchBtn}</button>`;
   }).join('')}</div>`;
 }
-function searchExercise(name){
+function searchURLFor(name){
   const cleaned = name.replace(/\([^)]*\)/g, '').trim(); // drop parenthetical detail for a cleaner query
-  const url = 'https://www.google.com/search?q=' + encodeURIComponent(cleaned + ' exercise how to');
-  window.open(url, '_blank');
+  return 'https://www.google.com/search?q=' + encodeURIComponent(cleaned + ' exercise how to');
+}
+function searchExercise(name){
+  window.open(searchURLFor(name), '_blank');
 }
 function escAttr(s){ return String(s).replace(/'/g, "\\'"); }
 function escHtml(s){ return String(s==null?'':s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
-// Turns each bullet line of a generated plan into: leading bullet marker (plain) + the exercise
-// name (tappable, searches Google) + the rest of the line (sets/reps/detail, plain). Headers and
-// plain prose lines pass through unchanged — only actual list items get linkified.
-function renderPlanWithSearchLinks(text){
-  if (!text) return '';
+// Shared parser: splits each bullet/numbered line of a generated plan into {prefix, name, rest} —
+// leading marker, the exercise-name portion (before the first : — – or comma), and everything
+// after (sets/reps/detail). Headers and plain prose lines come back with name:null, unchanged.
+function parsePlanLines(text){
+  if (!text) return [];
   return text.split('\n').map(line => {
     const bulletMatch = line.match(/^(\s*(?:[-*•]|\d+[.)])\s+)(.*)$/);
-    if (!bulletMatch) return escHtml(line);
+    if (!bulletMatch) return { prefix:'', name:null, rest: line };
     const prefix = bulletMatch[1];
-    let rest = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
-    const sepMatch = rest.match(/^(.*?)(:|—|–|,| - )([\s\S]*)$/);
-    const namePart = (sepMatch ? sepMatch[1] : rest).trim();
+    const body = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
+    const sepMatch = body.match(/^(.*?)(:|—|–|,| - )([\s\S]*)$/);
+    const namePart = (sepMatch ? sepMatch[1] : body).trim();
     const restPart = sepMatch ? sepMatch[2] + sepMatch[3] : '';
-    if (!namePart) return escHtml(prefix) + escHtml(rest);
-    const link = `<span class="ex-link" onclick="searchExercise('${escAttr(namePart)}')">${escHtml(namePart)}</span>`;
-    return escHtml(prefix) + link + escHtml(restPart);
-  }).join('\n');
+    if (!namePart) return { prefix, name:null, rest: body };
+    return { prefix, name: namePart, rest: restPart };
+  });
+}
+// In-app version: exercise name is a tappable span that calls searchExercise() via the app's own JS.
+function renderPlanWithSearchLinks(text){
+  return parsePlanLines(text).map(l => l.name === null
+    ? escHtml(l.rest)
+    : escHtml(l.prefix) + `<span class="ex-link" onclick="searchExercise('${escAttr(l.name)}')">${escHtml(l.name)}</span>` + escHtml(l.rest)
+  ).join('\n');
+}
+// Standalone version: real <a href> links, no JS dependency — works in an opened tab, a saved
+// HTML file, or offline, since it doesn't rely on this app's code being present.
+function linkifyPlanToHTML(text){
+  return parsePlanLines(text).map(l => l.name === null
+    ? escHtml(l.rest)
+    : escHtml(l.prefix) + `<a href="${searchURLFor(l.name)}" target="_blank" rel="noopener">${escHtml(l.name)}</a>` + escHtml(l.rest)
+  ).join('\n');
 }
 
 App.render = function(){
@@ -801,10 +844,11 @@ function renderToday(){
     ${App.ui.planText ? `<div class="plan-box">${renderPlanWithSearchLinks(App.ui.planText)}</div>
     <p class="small muted" style="margin-top:6px;">Tap any exercise name to search it.</p>
     <div class="pillrow" style="margin-top:10px;">
-      <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="openPlanAsText()">Open as text (new tab)</button>
+      <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="openPlanAsPage()">Open as page (tap-to-search)</button>
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="savePlanAsImage()">Save as image</button>
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="App.ui.showAdherence = !App.ui.showAdherence; App.render();">Add this to today's log</button>
     </div>
+    <p class="small muted" style="margin-top:6px;">Heads up: the image export is a flat picture — links only work in "Open as page."</p>
     ${App.ui.showAdherence ? `<div class="field" style="margin-top:10px;">
       <label>If you already did it (or partly did it) — how close did you end up sticking to this?</label>
       ${pillsHTML(ADHERENCE_OPTIONS, App.ui.planAdherencePick, 'setPlanAdherence', {sm:true})}
@@ -872,14 +916,15 @@ function renderLog(){
       <textarea style="margin-top:8px;" placeholder="Any detail worth adding..." oninput="App.ui.logDraft.failurePointsOther=this.value">${escHtml(d.failurePointsOther)}</textarea>
     </div>
     ` : isRest ? '' : `
-    <div class="field"><label>Workout style</label>${pillsHTML(WORKOUT_STYLES, d.workoutStyles, 'toggleLogWorkoutStyle', {sm:true})}</div>
+    <div class="field"><label>Workout style</label>${pillsHTML(TYPE_RELEVANT_STYLES[d.type] || WORKOUT_STYLES, d.workoutStyles, 'toggleLogWorkoutStyle', {sm:true})}</div>
     ${d.workoutStyles.length ? `
     <div class="field"><label>What did you do</label>
-      ${d.workoutStyles.map(style => `<div class="small muted" style="margin:8px 0 4px;">${escHtml(style)}</div>${pillsHTML(EXERCISE_LIBRARY[style]||[], d.exercisesDone, 'toggleLogExercise', {sm:true, searchable:true})}`).join('')}
+      ${d.workoutStyles.map(style => `<div class="small muted" style="margin:8px 0 4px;">${escHtml(style)}</div>${pillsHTML(EXERCISE_LIBRARY[style]||[], d.exercisesDone, 'toggleLogExercise', {sm:true})}`).join('')}
     </div>` : `<p class="small muted">Pick a workout style above to see exercise options, or just log time + notes below.</p>`}
     <div class="row2">
       <div class="field"><label>Strength</label><input type="number" min="0" value="${d.timeStrength}" oninput="App.ui.logDraft.timeStrength=this.value"></div>
       <div class="field"><label>Core</label><input type="number" min="0" value="${d.timeCore}" oninput="App.ui.logDraft.timeCore=this.value"></div>
+      <div class="field"><label>Legs</label><input type="number" min="0" value="${d.timeLegs}" oninput="App.ui.logDraft.timeLegs=this.value"></div>
       <div class="field"><label>Antagonist/stabilizer</label><input type="number" min="0" value="${d.timeAntag}" oninput="App.ui.logDraft.timeAntag=this.value"></div>
       <div class="field"><label>Mobility</label><input type="number" min="0" value="${d.timeMobility}" oninput="App.ui.logDraft.timeMobility=this.value"></div>
       <div class="field"><label>Cardio</label><input type="number" min="0" value="${d.timeCardio}" oninput="App.ui.logDraft.timeCardio=this.value"></div>
@@ -972,7 +1017,10 @@ function renderHistory(){
         ${e.pain&&e.pain!=='None'?`<p style="color:var(--red)"><b>Pain:</b> ${e.pain}</p>`:''}
         ${e.notes?`<p><b>Notes:</b> ${escHtml(e.notes)}</p>`:''}
         ${e.plan?`<p style="margin-bottom:4px;"><b>Planned workout:</b>${e.planAdherence?' <span class="muted small">('+escHtml(e.planAdherence)+')</span>':''}</p><div class="plan-box" style="margin-top:0;">${renderPlanWithSearchLinks(e.plan)}</div>`:''}
-        <button class="btn btn-ghost" style="width:auto;padding:8px 14px;margin-top:8px;" onclick="editEntry('${e.id}')">Edit this entry</button>
+        <div class="pillrow" style="margin-top:8px;">
+          <button class="btn btn-ghost" style="width:auto;padding:8px 14px;" onclick="editEntry('${e.id}')">Edit this entry</button>
+          <button class="btn btn-ghost" style="width:auto;padding:8px 14px;color:var(--red);border-color:var(--red);" onclick="deleteEntry('${e.id}')">Delete this entry</button>
+        </div>
       </div>` : ''}
     </div>`).join('');
 
@@ -1104,7 +1152,10 @@ function setLogIntensity(v){ App.ui.logDraft.intensity = v; App.render(); }
 function setLogPain(v){ App.ui.logDraft.pain = v; App.render(); }
 function setLogType(t){
   App.ui.logDraft.type = t;
-  if (TYPE_TO_WORKOUT_STYLE[t] && App.ui.logDraft.workoutStyles.length === 0) App.ui.logDraft.workoutStyles = [TYPE_TO_WORKOUT_STYLE[t]];
+  // Reset every time, not just when empty — otherwise a style picked for a previous type
+  // choice sticks around invisibly once the picker filters to the new type's relevant list.
+  App.ui.logDraft.workoutStyles = TYPE_TO_WORKOUT_STYLE[t] ? [TYPE_TO_WORKOUT_STYLE[t]] : [];
+  App.ui.logDraft.exercisesDone = [];
   App.render();
 }
 function toggleLogFocus(a){ toggleArr(App.ui.logDraft.focus, a); App.render(); }
@@ -1166,7 +1217,7 @@ const TYPE_TO_TIME_FIELD = {
   'Antagonist / Stabilizer': 'timeAntag', 'Mobility / Stretch': 'timeMobility', 'Strength': 'timeStrength', 'Cardio': 'timeCardio',
   'Core Workout': 'timeCore', 'Leg Workout': 'timeLegs',
 };
-const TYPE_TO_WORKOUT_STYLE = { 'Core Workout': 'Core Circuit', 'Leg Workout': 'Leg Day' };
+const TYPE_TO_WORKOUT_STYLE = { 'Core Workout': 'Core Circuit', 'Leg Workout': 'Leg Day', 'Mobility / Stretch': 'Stretch/Mobility' };
 function editEntry(id){
   const e = App.entries.find(x => x.id === id);
   if (!e) return;
@@ -1174,6 +1225,16 @@ function editEntry(id){
   App.ui.climbsDraft = (e.climbs || []).slice();
   App.ui.editingId = id;
   App.setTab('log');
+}
+function deleteEntry(id){
+  const e = App.entries.find(x => x.id === id);
+  if (!e) return;
+  if (!window.confirm(`Delete the ${e.date} entry (${e.type})? This can't be undone here — export your data first if you want a backup.`)) return;
+  App.entries = App.entries.filter(x => x.id !== id);
+  App.saveEntries();
+  App.ui.expandedEntry = null;
+  App.toast('Entry deleted');
+  App.render();
 }
 function cancelEdit(){
   App.ui.editingId = null;
@@ -1262,3 +1323,6 @@ window.setQAnswer = setQAnswer; window.submitAssessment = submitAssessment; wind
 window.applyPhaseOverride = applyPhaseOverride; window.exportData = exportData; window.importData = importData;
 window.clearPainFlag = clearPainFlag; window.editEntry = editEntry; window.cancelEdit = cancelEdit;
 window.toggleLogWorkoutStyle = toggleLogWorkoutStyle; window.toggleLogExercise = toggleLogExercise;
+window.deleteEntry = deleteEntry; window.openPlanAsPage = openPlanAsPage; window.savePlanAsImage = savePlanAsImage;
+window.savePlanToLog = savePlanToLog; window.searchExercise = searchExercise; window.setPlanAdherence = setPlanAdherence;
+window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
