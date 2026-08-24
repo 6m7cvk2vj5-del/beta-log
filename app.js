@@ -7,10 +7,22 @@ const WALL_ANGLES = ['Overhang','Vertical','Slab','Roof'];
 const HOLD_TYPES = ['Crimps','Slopers','Pockets','Pinches','Jugs'];
 const FEELING_SCALE = [{v:1,l:'Flat'},{v:2,l:'Off'},{v:3,l:'Steady'},{v:4,l:'Strong'},{v:5,l:'Dialed'}];
 const INTENSITY_OPTIONS = ['Easy','Moderate','Hard','Max effort'];
-const SESSION_TYPE_OPTIONS = ['Climbing','Antagonist / Stabilizer','Mobility / Stretch','Strength'];
+const SESSION_TYPE_OPTIONS = ['Climbing','Antagonist / Stabilizer','Mobility / Stretch','Strength','Cardio'];
 const PAIN_OPTIONS = ['None','Mild, manageable','Recurring issue','Something new'];
 const DAY_TYPES = ['Indoor','Outdoor','Bouldering','Sport/Rope','Project','Power','Power-Endurance','Skills/Technique','Fun/Social'];
 const FAILURE_POINT_OPTIONS = ["Grip/forearms gave out","Footwork broke down","Lost the sequence","Couldn't commit to the move","Got pumped","Couldn't reach the hold","Feet cut loose","Mental — backed off"];
+
+// Reference week — used only as a comparison point, not enforced. Mon/Fri rest, Tue/Thu climb,
+// Wed exercise, Sat+Sun climb (one exercise-focused, one fun-focused).
+const WEEKLY_TEMPLATE = ['Rest','Climb','Exercise','Climb','Rest','Climb','Climb']; // Mon..Sun
+const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+// Rough weekly minute targets used only to scale the radar chart — adjustable, not gospel.
+const WEEKLY_TARGETS = { climb:150, fingers:40, strength:30, antag:50, core:40, mobility:40, cardio:40 };
+const RADAR_AXES = [
+  {key:'climb', label:'Climbing'}, {key:'fingers', label:'Fingers'}, {key:'strength', label:'Strength'},
+  {key:'antag', label:'Antagonist'}, {key:'core', label:'Core'}, {key:'mobility', label:'Mobility'}, {key:'cardio', label:'Cardio'},
+];
 
 // Original 24-item self-assessment (not Horst's wording — see chat).
 // Category cycles every 3 items: mental, technique, physical — matching the pattern requested.
@@ -91,7 +103,8 @@ function todayISO(){ return new Date().toISOString().slice(0,10); }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function freshLogDraft(){
   return { date: todayISO(), type:'Climbing', duration:60, feeling:3, intensity:'Moderate',
-    dayTypes:[], dayTypesOther:'', focus:[], wallAngle:[], holdTypes:[], timeClimb:45, timeStrength:0, timeAntag:0, timeCore:0, timeMobility:0,
+    dayTypes:[], dayTypesOther:'', focus:[], wallAngle:[], holdTypes:[],
+    timeClimb:45, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeMobility:0, timeCardio:0,
     failurePoints:[], failurePointsOther:'', pain:'None', notes:'' };
 }
 function freshAskDraft(){
@@ -150,28 +163,165 @@ function applyPhaseOverride(){
   setPhaseManually(phaseName, week);
 }
 
-// ---- Pattern detection (simple, transparent heuristics) ----
+// ---- Day aggregation: multiple entries on one date collapse into one "day" record.
+// This is the single source of truth for anything that counts days (streaks, charts, patterns) —
+// logging stretching + antagonist + a climb on the same date is one day, not three.
+function aggregateByDay(entries){
+  const byDate = {};
+  entries.forEach(e => {
+    const d = byDate[e.date] || {
+      date: e.date, totalMinutes: 0, timeClimb:0, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeMobility:0, timeCardio:0,
+      types: [], dayTypes: [], focus: [], intensities: [], pain: 'None', entries: [],
+    };
+    d.totalMinutes += Number(e.duration) || 0;
+    d.timeClimb += Number(e.timeClimb) || 0;
+    d.timeFingers += Number(e.timeFingers) || 0;
+    d.timeStrength += Number(e.timeStrength) || 0;
+    d.timeAntag += Number(e.timeAntag) || 0;
+    d.timeCore += Number(e.timeCore) || 0;
+    d.timeMobility += Number(e.timeMobility) || 0;
+    d.timeCardio += Number(e.timeCardio) || 0;
+    if (!d.types.includes(e.type)) d.types.push(e.type);
+    (e.dayTypes||[]).forEach(t => { if (!d.dayTypes.includes(t)) d.dayTypes.push(t); });
+    (e.focus||[]).forEach(t => { if (!d.focus.includes(t)) d.focus.push(t); });
+    if (e.intensity) d.intensities.push(e.intensity);
+    if (e.pain && e.pain !== 'None') d.pain = e.pain; // any flagged pain that day wins
+    d.entries.push(e);
+    byDate[e.date] = d;
+  });
+  return byDate;
+}
+function dayList(entries){
+  return Object.values(aggregateByDay(entries)).sort((a,b)=> b.date.localeCompare(a.date));
+}
+// Classifies a day for the weekly-template comparison: Climbing beats Exercise beats Rest.
+function classifyDay(dayAgg){
+  if (!dayAgg) return 'No entry';
+  if (dayAgg.types.includes('Climbing')) return 'Climb';
+  if (dayAgg.types.includes('Rest') && dayAgg.types.length === 1) return 'Rest';
+  if (dayAgg.types.some(t => ['Antagonist / Stabilizer','Mobility / Stretch','Strength'].includes(t))) return 'Exercise';
+  return 'Rest';
+}
+
+// ---- Weekly template comparison ----
+function getWeekDates(anchorISO){
+  const anchor = new Date(anchorISO + 'T00:00:00');
+  const dow = (anchor.getDay() + 6) % 7; // 0=Mon .. 6=Sun
+  const monday = new Date(anchor); monday.setDate(anchor.getDate() - dow);
+  const out = [];
+  for (let i=0;i<7;i++){ const d = new Date(monday); d.setDate(monday.getDate()+i); out.push(d.toISOString().slice(0,10)); }
+  return out;
+}
+function compareToWeeklyTemplate(entries){
+  const dates = getWeekDates(todayISO());
+  const byDate = aggregateByDay(entries);
+  const today = todayISO();
+  const rows = dates.map((date, i) => ({
+    day: DAY_NAMES[i], date, template: WEEKLY_TEMPLATE[i],
+    actual: date <= today ? classifyDay(byDate[date]) : null, // don't judge days that haven't happened
+    isFuture: date > today,
+  }));
+  const notes = [];
+  rows.filter(r => !r.isFuture).forEach(r => {
+    if (r.actual === 'No entry') { notes.push(`${r.day}: nothing logged (template: ${r.template}).`); return; }
+    if (r.template === 'Rest' && r.actual === 'Climb') notes.push(`${r.day}: logged a climb on a template rest day.`);
+    if (r.template === 'Climb' && r.actual === 'Rest') notes.push(`${r.day}: rested on a template climbing day.`);
+  });
+  const climbDaysSoFar = rows.filter(r=>!r.isFuture && r.actual==='Climb').length;
+  const restDaysSoFar = rows.filter(r=>!r.isFuture && r.actual==='Rest').length;
+  const daysSoFar = rows.filter(r=>!r.isFuture).length;
+  return { rows, notes, climbDaysSoFar, restDaysSoFar, daysSoFar };
+}
+
+// ---- Radar data ----
+function computeWeeklyRadarData(entries){
+  const days = dayList(entries).filter(d => {
+    const daysAgo = Math.round((new Date(todayISO()) - new Date(d.date)) / 86400000);
+    return daysAgo >= 0 && daysAgo < 7;
+  });
+  const sums = { climb:0, fingers:0, strength:0, antag:0, core:0, mobility:0, cardio:0 };
+  days.forEach(d => { Object.keys(sums).forEach(k => { sums[k] += d['time'+k[0].toUpperCase()+k.slice(1)] || 0; }); });
+  return RADAR_AXES.map(a => ({ axis: a.label, pct: Math.min(150, Math.round((sums[a.key] / WEEKLY_TARGETS[a.key]) * 100)) }));
+}
+function renderRadarSVG(data, size){
+  size = size || 220;
+  const cx = size/2, cy = size/2, r = size/2 - 34;
+  const n = data.length;
+  const angle = i => (Math.PI*2*i/n) - Math.PI/2;
+  const pt = (i, frac) => [cx + r*frac*Math.cos(angle(i)), cy + r*frac*Math.sin(angle(i))];
+  const rings = [0.25,0.5,0.75,1].map(frac => {
+    const pts = data.map((d,i)=> pt(i,frac).join(',')).join(' ');
+    return `<polygon points="${pts}" fill="none" stroke="var(--border)" stroke-width="1"/>`;
+  }).join('');
+  const spokes = data.map((d,i)=> { const [x,y]=pt(i,1); return `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="var(--border)" stroke-width="1"/>`; }).join('');
+  const dataPts = data.map((d,i)=> pt(i, Math.min(1, d.pct/100)).join(',')).join(' ');
+  const targetPts = data.map((d,i)=> pt(i,1).join(',')).join(' ');
+  const labels = data.map((d,i)=> {
+    const [x,y] = pt(i, 1.22);
+    const anchor = Math.abs(Math.cos(angle(i))) < 0.3 ? 'middle' : (Math.cos(angle(i)) > 0 ? 'start' : 'end');
+    return `<text x="${x}" y="${y}" fill="var(--muted)" font-size="10.5" text-anchor="${anchor}" dominant-baseline="middle">${escHtml(d.axis)}</text>`;
+  }).join('');
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    ${rings}${spokes}
+    <polygon points="${targetPts}" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3,3"/>
+    <polygon points="${dataPts}" fill="rgba(204,155,60,.35)" stroke="var(--gold)" stroke-width="2"/>
+    ${labels}
+  </svg>`;
+}
+
+// ---- Pattern detection (simple, transparent heuristics, day-based not entry-based) ----
 function detectPatterns(entries){
   const flags = [];
-  const sorted = [...entries].sort((a,b)=> b.date.localeCompare(a.date));
-  const last10 = sorted.slice(0,10);
-  const last4Climbing = sorted.filter(e=>e.type==='Climbing').slice(0,4);
+  const days = dayList(entries); // already sorted, most recent first, one record per calendar day
+  const last10Days = days.slice(0,10);
+  const last14Days = days.filter(d => { const ago = Math.round((new Date(todayISO())-new Date(d.date))/86400000); return ago>=0 && ago<14; });
+  const last7Days = days.filter(d => { const ago = Math.round((new Date(todayISO())-new Date(d.date))/86400000); return ago>=0 && ago<7; });
+  const climbDays = days.filter(d => classifyDay(d)==='Climb');
+  const last4ClimbDays = climbDays.slice(0,4);
 
-  const antagMinutes10 = last10.reduce((s,e)=> s + (Number(e.timeAntag)||0), 0);
-  if (last10.length >= 6 && antagMinutes10 === 0) {
-    flags.push("Antagonist/stabilizer work hasn't shown up in your last " + last10.length + " sessions. That's the piece most likely to quietly turn into shoulder or elbow trouble if it keeps getting skipped.");
+  const antag10 = last10Days.reduce((s,d)=> s + d.timeAntag, 0);
+  if (last10Days.length >= 6 && antag10 === 0) {
+    flags.push("Antagonist/stabilizer work hasn't shown up in your last " + last10Days.length + " logged days. That's the piece most likely to quietly turn into shoulder or elbow trouble if it keeps getting skipped.");
   }
 
-  if (last4Climbing.length === 4 && last4Climbing.every(e => e.intensity === 'Max effort' || e.intensity === 'Hard')) {
-    flags.push("Your last 4 climbing sessions were all Hard/Max effort. Worth a lighter, skill- or mobility-focused day before stacking a 5th.");
+  const fingers14 = last14Days.reduce((s,d)=> s + d.timeFingers, 0);
+  if (last14Days.length >= 5 && fingers14 === 0) {
+    flags.push("No dedicated finger-strength work in the last 14 days. Small holds don't improve on climbing volume alone — worth a hangboard session.");
   }
 
-  const lastMobility = sorted.find(e => e.type === 'Mobility / Stretch' || Number(e.timeMobility) > 0);
-  if (lastMobility) {
-    const days = Math.round((new Date(todayISO()) - new Date(lastMobility.date)) / 86400000);
-    if (days >= 10) flags.push("It's been " + days + " days since any mobility/stretch work showed up in the log.");
-  } else if (sorted.length >= 6) {
+  if (last4ClimbDays.length === 4 && last4ClimbDays.every(d => d.intensities.includes('Max effort') || (d.intensities.length && d.intensities.every(i=>i==='Hard'||i==='Max effort')))) {
+    flags.push("Your last 4 climbing days were all Hard/Max effort. Worth a lighter, skill- or mobility-focused day before stacking a 5th.");
+  }
+
+  const lastMobilityDay = days.find(d => d.timeMobility > 0);
+  if (lastMobilityDay) {
+    const ago = Math.round((new Date(todayISO()) - new Date(lastMobilityDay.date)) / 86400000);
+    if (ago >= 10) flags.push("It's been " + ago + " days since any mobility/stretch work showed up in the log.");
+  } else if (days.length >= 6) {
     flags.push("No mobility/stretch work logged yet — worth adding on a non-climbing day.");
+  }
+
+  // training frequency: fewer than 3 active (non-rest) days in the trailing 7
+  const activeDays7 = last7Days.filter(d => classifyDay(d) !== 'Rest').length;
+  if (last7Days.length >= 4 && activeDays7 < 3) {
+    flags.push("Only " + activeDays7 + " active day(s) logged in the last 7 — light week, or just under-logged?");
+  }
+
+  // rest: 6+ consecutive logged calendar days with zero Rest-classified days among them
+  const consecutive = [];
+  for (let i=0;i<days.length;i++){
+    if (i===0) { consecutive.push(days[i]); continue; }
+    const prevDate = new Date(days[i-1].date), curDate = new Date(days[i].date);
+    if (Math.round((prevDate-curDate)/86400000) === 1) consecutive.push(days[i]); else break;
+  }
+  if (consecutive.length >= 6 && !consecutive.some(d => classifyDay(d)==='Rest')) {
+    flags.push("6+ days logged in a row with no rest day in between. Rest is where the adaptation actually happens.");
+  }
+
+  // weekly template comparison — only mention if the week is meaningfully off, not every minor blip
+  const tmpl = compareToWeeklyTemplate(entries);
+  if (tmpl.daysSoFar >= 3 && tmpl.notes.length >= 2) {
+    flags.push("This week's shape is drifting from your usual rhythm: " + tmpl.notes.slice(0,2).join(' '));
   }
 
   return flags;
@@ -195,7 +345,7 @@ function getWeakPointProfile(){
 function climbingSessionsSinceLastAssessment(){
   const last = App.assessments[App.assessments.length - 1];
   const cutoff = last ? last.date : '0000-00-00';
-  return App.entries.filter(e => e.type === 'Climbing' && e.date > cutoff).length;
+  return dayList(App.entries).filter(d => d.date > cutoff && classifyDay(d)==='Climb').length;
 }
 
 function getMostRecentPainStatus(entries){
@@ -216,15 +366,22 @@ async function askClaude(){
   const weak = getWeakPointProfile();
   const d = App.ui.askDraft;
 
-  const recent = [...App.entries].sort((a,b)=> b.date.localeCompare(a.date)).slice(0,14).reverse().map(e => {
-    const failureStr = [].concat(e.failurePoints||[], e.failurePointsOther||[]).filter(Boolean).join(', ');
-    const dayTypeStr = [].concat(e.dayTypes||[], e.dayTypesOther||[]).filter(Boolean).join('/');
-    const t = e.type==='Climbing' ? `${e.duration}min, ${e.intensity}, day type: ${dayTypeStr||'unspecified'}, feeling ${e.feeling}/5, focus: ${(e.focus||[]).join(', ')||'none'}${failureStr?', broke down on: '+failureStr:''}${e.pain && e.pain!=='None' ? ', PAIN: '+e.pain : ''}`
-      : `${e.type}${e.notes ? ' - '+e.notes : ''}`;
-    return `${e.date}: ${t}`;
+  const recent = dayList(App.entries).slice(0,14).reverse().map(d => {
+    const cls = classifyDay(d);
+    const failureStr = d.entries.flatMap(e => [].concat(e.failurePoints||[])).join(', ');
+    const parts = [`${d.totalMinutes}min total`, cls];
+    if (d.dayTypes.length) parts.push('day type: '+d.dayTypes.join('/'));
+    if (d.intensities.length) parts.push('intensity: '+d.intensities.join('/'));
+    if (d.focus.length) parts.push('focus: '+d.focus.join(', '));
+    parts.push(`time — climb:${d.timeClimb} fingers:${d.timeFingers} strength:${d.timeStrength} antag:${d.timeAntag} core:${d.timeCore} mobility:${d.timeMobility} cardio:${d.timeCardio}`);
+    if (failureStr) parts.push('broke down on: '+failureStr);
+    if (d.pain !== 'None') parts.push('PAIN: '+d.pain);
+    return `${d.date}: ${parts.join(', ')}`;
   }).join('\n') || 'No prior entries yet.';
 
   const mostRecentPain = getMostRecentPainStatus(App.entries);
+  const tmpl = compareToWeeklyTemplate(App.entries);
+  const tmplLine = tmpl.notes.length ? tmpl.notes.join(' ') : 'On track with the usual weekly rhythm so far.';
 
   let focusLine = '';
   if (d.focusMode === 'other' && d.focusOther.trim()) {
@@ -239,24 +396,32 @@ async function askClaude(){
   if (d.focusSecondary) focusLine += ` Secondary focus: ${d.focusSecondary}.`;
 
   const sys = "You are an experienced rock climbing training coach, working with an intermediate climber. " +
-    "You're given their training cycle phase, a phase-structure guideline, their recent session log, detected " +
-    "training patterns, and today's context. Give a single, specific, concrete plan for today's session, sized to " +
-    "the exact time budget given. Use short list format with rough durations/sets/reps, no fluff, no disclaimers. " +
-    "Follow the phase guideline loosely, not rigidly. Design climbing portions around 4-8 move problems or route " +
-    "laps with real rest between attempts — never a single move drilled to exhaustion, and never just 20 minutes " +
-    "projecting one hard climb. On non-climbing days, build a real mobility/general-movement session, not just a " +
-    "stretch list. If a pattern flag below is relevant, address it directly in the plan (e.g. slot in antagonist " +
-    "work if it's been skipped) and say briefly why. The 'Current pain status' line is the authoritative, most " +
-    "recent state — if it says None, do not dwell on older pain mentions elsewhere in the log; if it says anything " +
-    "else, do not prescribe exercise for the affected area, recommend rest and seeing a doctor or physical " +
-    "therapist instead, and only plan around unaffected areas if that still makes sense.";
+    "You're given their training cycle phase, a phase-structure guideline, their recent log aggregated by calendar " +
+    "day (a day with multiple logged sub-sessions is already combined into one line — treat it as one day, not " +
+    "several), detected training patterns, and today's context. Give a single, specific, concrete plan for today's " +
+    "session, sized to the exact time budget given. Use short list format with rough durations/sets/reps, no fluff, " +
+    "no disclaimers. Follow the phase guideline loosely, not rigidly.\n\n" +
+    "STRUCTURE REQUIREMENT for any day that includes climbing: always include, in this order — (1) warmup, " +
+    "(2) climbing volume, (3) some near-limit/limit climbing, (4) climbing-related strength or power exercise, " +
+    "(5) cooldown/stabilizer work. Never drop a piece, but vary the AMOUNT of each — how much climbing, how much " +
+    "antagonist/stabilizer, how much cardio — based on the phase, time budget, and the patterns/weekly-rhythm notes " +
+    "below. Design climbing portions around 4-8 move problems or route laps with real rest between attempts — never " +
+    "a single move drilled to exhaustion, and never just 20 minutes projecting one hard climb. On non-climbing days, " +
+    "build a real mobility/general-movement session, not just a stretch list.\n\n" +
+    "If a pattern flag or weekly-rhythm note is relevant, address it directly in the plan (e.g. slot in finger work " +
+    "or antagonist work if it's been skipped, or flag that a rest day is overdue) and say briefly why. The 'Current " +
+    "pain status' line is the authoritative, most recent state — if it says None, do not dwell on older pain " +
+    "mentions elsewhere in the log; if it says anything else, do not prescribe exercise for the affected area, " +
+    "recommend rest and seeing a doctor or physical therapist instead, and only plan around unaffected areas if " +
+    "that still makes sense.";
 
   const user = `Cycle: ${App.settings.cycleType}, currently in "${cycle.phaseName}" (week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks}, cycle #${cycle.cycleNumber}).\n` +
     `Phase guideline: ${guidance}\n` +
     `Indoor grade: ${App.settings.gradeIndoor || 'not set'} · Outdoor grade: ${App.settings.gradeOutdoor || 'not set'}\n` +
-    `Current pain status (most recent entry): ${mostRecentPain}\n\n` +
+    `Current pain status (most recent entry): ${mostRecentPain}\n` +
+    `This week vs. usual rhythm: ${tmplLine}\n\n` +
     `Detected patterns: ${flags.length ? flags.join(' | ') : 'none flagged'}\n\n` +
-    `Recent log (most recent last):\n${recent}\n\n` +
+    `Recent log, one line per calendar day (most recent last):\n${recent}\n\n` +
     `Today:\n- Minutes available: ${d.minutes}\n- Feeling: ${FEELING_SCALE.find(f=>f.v===d.feeling).l} (${d.feeling}/5)\n` +
     `- Location: ${d.location}\n- Session type(s) wanted: ${d.sessionTypes.join(', ') || 'no preference'}\n- Priority focus: ${focusLine}\n\n` +
     `Give today's plan.`;
@@ -401,12 +566,15 @@ function renderLog(){
     <div class="field"><label>Wall angle</label>${pillsHTML(WALL_ANGLES, d.wallAngle, 'toggleLogWall', {sm:true})}</div>
     <div class="field"><label>Hold types</label>${pillsHTML(HOLD_TYPES, d.holdTypes, 'toggleLogHold', {sm:true})}</div>
     <h3>Time spent (minutes)</h3>
+    <p class="small muted">Log stretching, mobility, or antagonist work as their own entry on the same date if you did them separately — the app combines same-day entries into one day, it won't count as extra days.</p>
     <div class="row2">
       <div class="field"><label>Climbing</label><input type="number" min="0" value="${d.timeClimb}" oninput="App.ui.logDraft.timeClimb=this.value"></div>
+      <div class="field"><label>Finger strength</label><input type="number" min="0" value="${d.timeFingers}" oninput="App.ui.logDraft.timeFingers=this.value"></div>
       <div class="field"><label>Strength</label><input type="number" min="0" value="${d.timeStrength}" oninput="App.ui.logDraft.timeStrength=this.value"></div>
       <div class="field"><label>Antagonist/stabilizer</label><input type="number" min="0" value="${d.timeAntag}" oninput="App.ui.logDraft.timeAntag=this.value"></div>
       <div class="field"><label>Core</label><input type="number" min="0" value="${d.timeCore}" oninput="App.ui.logDraft.timeCore=this.value"></div>
       <div class="field"><label>Mobility</label><input type="number" min="0" value="${d.timeMobility}" oninput="App.ui.logDraft.timeMobility=this.value"></div>
+      <div class="field"><label>Cardio</label><input type="number" min="0" value="${d.timeCardio}" oninput="App.ui.logDraft.timeCardio=this.value"></div>
     </div>
     <div class="field"><label>What broke down</label>
       ${pillsHTML(FAILURE_POINT_OPTIONS, d.failurePoints, 'toggleLogFailurePoint', {sm:true})}
@@ -426,31 +594,32 @@ function renderHistory(){
   if (entries.length === 0) {
     return `<div class="card"><p class="muted small">No entries yet. Log a session on the Log tab to start stacking your history.</p></div>`;
   }
-  const climbingCount = entries.filter(e=>e.type==='Climbing').length;
+  const days = dayList(entries); // one record per calendar day, entries already combined
+  const climbDayCount = days.filter(d => classifyDay(d)==='Climb').length;
   const sinceAssessment = climbingSessionsSinceLastAssessment();
 
-  // last 12 weeks heatmap
-  const map = {}; entries.forEach(e => { map[e.date] = e; });
-  const days = [];
+  // last 12 weeks heatmap — keyed by day-aggregate so a 3-entry day still shows as one cell
+  const map = {}; days.forEach(d => { map[d.date] = d; });
+  const cal = [];
   const today = new Date(todayISO()+'T00:00:00');
-  for (let i=83;i>=0;i--){ const d=new Date(today); d.setDate(d.getDate()-i); const iso=d.toISOString().slice(0,10); days.push({date:iso, e:map[iso]||null}); }
-  const weeks = []; for (let i=0;i<days.length;i+=7) weeks.push(days.slice(i,i+7));
-  const maxDur = Math.max(1, ...entries.map(e=>Number(e.duration)||0));
-  const heat = weeks.map(w => `<div class="heatcol">${w.map(day=>{
-    const inten = day.e ? Math.max(.18, (Number(day.e.duration)||0)/maxDur) : 0;
-    return `<div class="heatcell" title="${day.date}${day.e?' — '+day.e.duration+'min':''}" style="background:${day.e?`rgba(204,155,60,${inten})`:'var(--surface2)'}"></div>`;
+  for (let i=83;i>=0;i--){ const dd=new Date(today); dd.setDate(dd.getDate()-i); const iso=dd.toISOString().slice(0,10); cal.push({date:iso, d:map[iso]||null}); }
+  const weeks = []; for (let i=0;i<cal.length;i+=7) weeks.push(cal.slice(i,i+7));
+  const maxDur = Math.max(1, ...days.map(d=>d.totalMinutes));
+  const heat = weeks.map(w => `<div class="heatcol">${w.map(cell=>{
+    const inten = cell.d ? Math.max(.18, cell.d.totalMinutes/maxDur) : 0;
+    return `<div class="heatcell" title="${cell.date}${cell.d?' — '+cell.d.totalMinutes+'min':''}" style="background:${cell.d?`rgba(204,155,60,${inten})`:'var(--surface2)'}"></div>`;
   }).join('')}</div>`).join('');
 
-  // minutes last 14 days
-  const last14 = [...entries].slice(0,14).reverse();
-  const maxMin14 = Math.max(1, ...last14.map(e=>Number(e.duration)||0));
-  const minBars = last14.map(e => `<div class="bar-row"><div class="bar-label">${e.date.slice(5)}</div>
-    <div class="bar-track"><div class="bar-fill" style="width:${(Number(e.duration)||0)/maxMin14*100}%"></div></div>
-    <div class="bar-val">${e.duration}</div></div>`).join('');
+  // minutes, last 14 calendar days (one bar per day, combined)
+  const last14 = days.slice(0,14).reverse();
+  const maxMin14 = Math.max(1, ...last14.map(d=>d.totalMinutes));
+  const minBars = last14.map(d => `<div class="bar-row"><div class="bar-label">${d.date.slice(5)}</div>
+    <div class="bar-track"><div class="bar-fill" style="width:${d.totalMinutes/maxMin14*100}%"></div></div>
+    <div class="bar-val">${d.totalMinutes}</div></div>`).join('');
 
-  // focus area frequency
+  // focus area frequency (by day, so a focus worked 3x same day still counts once)
   const counts = {}; FOCUS_AREAS.forEach(a=>counts[a]=0);
-  entries.forEach(e => (e.focus||[]).forEach(a=>{counts[a]=(counts[a]||0)+1;}));
+  days.forEach(d => d.focus.forEach(a=>{counts[a]=(counts[a]||0)+1;}));
   const maxCount = Math.max(1, ...Object.values(counts));
   const focusBars = FOCUS_AREAS.map(a => `<div class="bar-row"><div class="bar-label">${a}</div>
     <div class="bar-track"><div class="bar-fill" style="width:${counts[a]/maxCount*100}%"></div></div>
@@ -458,16 +627,25 @@ function renderHistory(){
 
   // day type frequency
   const dtCounts = {}; DAY_TYPES.forEach(a=>dtCounts[a]=0);
-  entries.forEach(e => (e.dayTypes||[]).forEach(a=>{dtCounts[a]=(dtCounts[a]||0)+1;}));
+  days.forEach(d => d.dayTypes.forEach(a=>{dtCounts[a]=(dtCounts[a]||0)+1;}));
   const maxDt = Math.max(1, ...Object.values(dtCounts));
   const dtBars = DAY_TYPES.map(a => `<div class="bar-row"><div class="bar-label">${a}</div>
     <div class="bar-track"><div class="bar-fill" style="width:${dtCounts[a]/maxDt*100}%"></div></div>
     <div class="bar-val">${dtCounts[a]}</div></div>`).join('');
 
+  // weekly balance radar + template comparison
+  const radarData = computeWeeklyRadarData(entries);
+  const tmpl = compareToWeeklyTemplate(entries);
+  const tmplRow = tmpl.rows.map(r => `<div class="stat" style="opacity:${r.isFuture?0.4:1}">
+      <div class="lbl">${r.day}</div>
+      <div class="small" style="margin-top:4px;">${r.isFuture ? '—' : escHtml(r.actual)}</div>
+      <div class="small muted">(usually ${r.template})</div>
+    </div>`).join('');
+
   const entryRows = entries.map(e => `
     <div class="entry">
       <button class="entry-head" onclick="toggleEntry('${e.id}')">
-        <span><b>${e.date}</b> &nbsp;<span class="muted">${e.type}${e.type==='Climbing' ? ' · '+e.duration+'min · '+FEELING_SCALE.find(f=>f.v==e.feeling).l : ''}</span></span>
+        <span><b>${e.date}</b> &nbsp;<span class="muted">${e.type}${e.type==='Climbing' ? ' · '+e.duration+'min · '+FEELING_SCALE.find(f=>f.v==e.feeling).l : ' · '+e.duration+'min'}</span></span>
         <span>${App.ui.expandedEntry===e.id?'▲':'▼'}</span>
       </button>
       ${App.ui.expandedEntry===e.id ? `<div class="entry-body">
@@ -493,13 +671,24 @@ function renderHistory(){
   return `
   <div class="card"><h2>Overview</h2>
     <div class="statgrid">
-      <div class="stat"><div class="num">${entries.length}</div><div class="lbl">Total entries</div></div>
-      <div class="stat"><div class="num">${climbingCount}</div><div class="lbl">Climbing sessions</div></div>
+      <div class="stat"><div class="num">${days.length}</div><div class="lbl">Days logged</div></div>
+      <div class="stat"><div class="num">${climbDayCount}</div><div class="lbl">Climbing days</div></div>
       <div class="stat"><div class="num">${sinceAssessment}</div><div class="lbl">Since check-in</div></div>
     </div>
   </div>
+  <div class="card">
+    <h2>Weekly balance</h2>
+    <p class="small muted">Trailing 7 days vs. rough weekly targets. Dashed ring = target; gold = you.</p>
+    <div style="display:flex;justify-content:center;">${renderRadarSVG(radarData)}</div>
+  </div>
+  <div class="card">
+    <h2>This week vs. your usual rhythm</h2>
+    <p class="small muted">Reference: Mon rest &middot; Tue climb &middot; Wed exercise &middot; Thu climb &middot; Fri rest &middot; Sat/Sun climb.</p>
+    <div class="statgrid" style="grid-template-columns:repeat(7,1fr);">${tmplRow}</div>
+    ${tmpl.notes.length ? `<p class="small" style="margin-top:10px;color:var(--red);">${tmpl.notes.join(' ')}</p>` : `<p class="small muted" style="margin-top:10px;">Tracking the usual rhythm so far this week.</p>`}
+  </div>
   <div class="card"><h2>Last 12 weeks</h2><div class="heatgrid">${heat}</div></div>
-  <div class="card"><h2>Minutes, last 14 entries</h2><div class="barlist">${minBars}</div></div>
+  <div class="card"><h2>Minutes, last 14 days</h2><div class="barlist">${minBars}</div></div>
   <div class="card"><h2>Focus area attention</h2><div class="barlist">${focusBars}</div></div>
   <div class="card"><h2>Day types, over time</h2><div class="barlist">${dtBars}</div></div>
   <div class="card"><h2>Weak-point check-ins</h2>${assessRows}</div>
@@ -645,9 +834,23 @@ function importData(file){
 }
 
 
+const TYPE_TO_TIME_FIELD = {
+  'Antagonist / Stabilizer': 'timeAntag', 'Mobility / Stretch': 'timeMobility', 'Strength': 'timeStrength', 'Cardio': 'timeCardio',
+};
 function submitLog(){
   const d = App.ui.logDraft;
   const entry = Object.assign({ id: uid() }, d, { climbs: App.ui.climbsDraft.slice() });
+  if (entry.type !== 'Climbing') {
+    // These fields are hidden from the form for non-climbing entries, but freshLogDraft() still
+    // carries default values for them — zero/clear them explicitly so stale defaults (e.g. a leftover
+    // timeClimb) never leak into day-aggregation for a day that had no actual climbing on it.
+    entry.timeClimb = 0; entry.intensity = ''; entry.dayTypes = []; entry.focus = [];
+    entry.wallAngle = []; entry.holdTypes = []; entry.failurePoints = []; entry.failurePointsOther = ''; entry.climbs = [];
+  }
+  // Standalone non-climbing entries (logged as their own type) only expose a single Duration field —
+  // map that into the matching time-bucket so day-aggregation, patterns, and the radar chart see it.
+  const bucket = TYPE_TO_TIME_FIELD[entry.type];
+  if (bucket && !entry[bucket]) entry[bucket] = Number(entry.duration) || 0;
   App.entries = App.entries.filter(e => !(e.date===entry.date && e.type===entry.type)).concat([entry])
     .sort((a,b)=> a.date.localeCompare(b.date));
   App.saveEntries();
