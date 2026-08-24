@@ -3,12 +3,15 @@
    using your own key (stored locally, never written into this file). */
 
 const FOCUS_AREAS = ['Small holds','Bouldery pulling','Overhangs','High feet','Leg tension','Body tension','Hips to wall'];
+
+
 const WALL_ANGLES = ['Overhang','Vertical','Slab','Roof'];
 const HOLD_TYPES = ['Crimps','Slopers','Pockets','Pinches','Jugs'];
 const FEELING_SCALE = [{v:1,l:'Flat'},{v:2,l:'Off'},{v:3,l:'Steady'},{v:4,l:'Strong'},{v:5,l:'Dialed'}];
 const INTENSITY_OPTIONS = ['Easy','Moderate','Hard','Max effort'];
-const SESSION_TYPE_OPTIONS = ['Climbing','Antagonist / Stabilizer','Mobility / Stretch','Strength','Cardio'];
+const SESSION_TYPE_OPTIONS = ['Climbing','Antagonist / Stabilizer','Mobility / Stretch','Strength','Cardio','Core Workout','Leg Workout'];
 const PAIN_OPTIONS = ['None','Mild, manageable','Recurring issue','Something new'];
+const ADHERENCE_OPTIONS = ['Followed exactly','Mostly followed','Modified a lot','Did something else entirely'];
 const DAY_TYPES = ['Indoor','Outdoor','Bouldering','Sport/Rope','Project','Power','Power-Endurance','Skills/Technique','Fun/Social'];
 const FAILURE_POINT_OPTIONS = ["Grip/forearms gave out","Footwork broke down","Lost the sequence","Couldn't commit to the move","Got pumped","Couldn't reach the hold","Feet cut loose","Mental — backed off"];
 
@@ -18,10 +21,97 @@ const WEEKLY_TEMPLATE = ['Rest','Climb','Exercise','Climb','Rest','Climb','Climb
 const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
 // Rough weekly minute targets used only to scale the radar chart — adjustable, not gospel.
-const WEEKLY_TARGETS = { climb:150, fingers:40, strength:30, antag:50, core:40, mobility:40, cardio:40 };
+const WEEKLY_TARGETS = { climb:150, fingers:40, strength:30, antag:50, core:40, mobility:40, cardio:40, legs:30 };
 const RADAR_AXES = [
   {key:'climb', label:'Climbing'}, {key:'fingers', label:'Fingers'}, {key:'strength', label:'Strength'},
-  {key:'antag', label:'Antagonist'}, {key:'core', label:'Core'}, {key:'mobility', label:'Mobility'}, {key:'cardio', label:'Cardio'},
+  {key:'antag', label:'Antagonist'}, {key:'core', label:'Core'}, {key:'legs', label:'Legs'}, {key:'mobility', label:'Mobility'}, {key:'cardio', label:'Cardio'},
+];
+
+// Your own workout structures and exercise pool — used for logging (what did I do) and the
+// weekly-guidelines check-in. These are guidelines to notice drift on, not requirements to hit.
+const WORKOUT_STYLES = ['Core Circuit','Leg Day','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout','General/Other'];
+const EXERCISE_LIBRARY = {
+  'Core Circuit': ["Hanging leg lift","Oblique weighted arm dip","Sit-up to stand-up","Wheelbarrow","Oblique knee raise plank","Farmer walk","A-frame drop","Plank (elevated)","Plank (sideways walk)","Side plank with leg raise","Full-body focus plank","Kettlebell figure 8","Matrix lean back"],
+  'Leg Day': ["Squat/deadlift","Catcher calf raises","Calf jumps","High stepping","Weighted box jumps","Bulgarian lunges","Hanging knee lifts","Wall sits","Multidirectional lunges","Core-to-toe side lunges"],
+  'Upper Tabata': ["Bent-over rows","Lat pulldowns","Bicep curls","Wrist curls"],
+  'TRX — Core': ["Body saw","Side plank with hip raise","Overhead squat"],
+  'TRX — Shoulder': ["Clock press","T-Y-I deltoid series","Atomic pushups","T-spine rotation"],
+  'Full Efficient Workout': ["Mountain mans (rope/pulley alternating lockouts)","Campus board lunges","Around-the-world pull-ups","Offset pull-ups","Box jumps","One-leg squats","Lunges with shoulder press","Step-ups onto box","Tucks","Bridges","Side elbow planks","Dip-bar leg raises","Superman pushups","Bicep/tricep work","Chest/upper work","Forearm plank","Dolphin pushups","One-arm planks","Toe touches","Scissor kicks"],
+  'General/Other': ["Finger hangs","Finger pull-ups","Hanging leg raises","Pistol squats","Suicide sprints","Finger planks","Raised-leg diamond pushups","Jumping lunges","Lateral pull-ups","Upside-down shoulder press","Tricep dips","Incline pushups","Chair ups","Stair jumps","Stair sprints","Front squats","Turkish getup","Straight-arm planks","Shoulder dislocates"],
+};
+
+// Titles only, from your two physical books — enough to point you at the right page, not a
+// reproduction of the content. "Drill" mode picks from here; "Play" mode ignores this entirely.
+const DRILL_LIBRARY = [
+  {t:'Twist-Lock & Backstep', book:'Training for Climbing', cat:'Technique'},
+  {t:'Flagging (inside-edge flag-across / outside-edge flag-out)', book:'Training for Climbing', cat:'Technique'},
+  {t:'Drop-Knee', book:'Training for Climbing', cat:'Technique'},
+  {t:'Rock-Over', book:'Training for Climbing', cat:'Technique'},
+  {t:'High-Step Precision Drill', book:'Training for Climbing', cat:'Technique'},
+  {t:'Downclimbing Routes', book:'Training for Climbing', cat:'Technique'},
+  {t:'Small-Foot Elimination (Tracking and Elimination)', book:'Training for Climbing', cat:'Technique'},
+  {t:'First Touch', book:'Training for Climbing', cat:'Technique'},
+  {t:'Speed Training', book:'Training for Climbing', cat:'Technique'},
+  {t:'Minimum-Edge Hangs', book:'Training for Climbing', cat:'Fingers'},
+  {t:'HIT System (max-strength hangs)', book:'Training for Climbing', cat:'Fingers'},
+  {t:'Bouldering 4x4s', book:'Training for Climbing', cat:'Power-Endurance'},
+  {t:'System Wall Repeaters', book:'Training for Climbing', cat:'Power-Endurance'},
+  {t:'Campus Laddering (feet-on)', book:'Training for Climbing', cat:'Power'},
+  {t:'Big-Move Boulder Problems', book:'Training for Climbing', cat:'Power'},
+
+  {t:'Precision Feet (footwork drill)', book:'Climb to Fitness', cat:'Technique'},
+  {t:'Foot Stab (footwork drill)', book:'Climb to Fitness', cat:'Technique'},
+  {t:'Blinking (footwork drill)', book:'Climb to Fitness', cat:'Technique'},
+  {t:'Jibs Only (footwork drill)', book:'Climb to Fitness', cat:'Technique'},
+  {t:'Downclimbing (footwork drill)', book:'Climb to Fitness', cat:'Technique'},
+  {t:'Glue Feet (footwork drill)', book:'Climb to Fitness', cat:'Technique'},
+  {t:'Observe (footwork drill)', book:'Climb to Fitness', cat:'Technique'},
+  {t:'Create a Crux', book:'Climb to Fitness', cat:'Technique'},
+  {t:'MoonBoard', book:'Climb to Fitness', cat:'Technique'},
+  {t:'Bookends', book:'Climb to Fitness', cat:'Technique'},
+  {t:'Flash Sessions', book:'Climb to Fitness', cat:'Technique'},
+  {t:'Limit Bouldering', book:'Climb to Fitness', cat:'Technique'},
+  {t:'Traverse Eliminates', book:'Climb to Fitness', cat:'Technique'},
+  {t:'Climb with Grace on the System Board', book:'Climb to Fitness', cat:'Technique'},
+  {t:'Climb Forever Arc Sets', book:'Climb to Fitness', cat:'Endurance'},
+  {t:'Leapfrog', book:'Climb to Fitness', cat:'Endurance'},
+  {t:'Pyramids', book:'Climb to Fitness', cat:'Endurance'},
+  {t:'Roped Intervals', book:'Climb to Fitness', cat:'Endurance'},
+  {t:'Volume for Points', book:'Climb to Fitness', cat:'Endurance'},
+  {t:'Laps', book:'Climb to Fitness', cat:'Endurance'},
+  {t:'3x10 Intervals', book:'Climb to Fitness', cat:'Endurance'},
+  {t:'Up-Downs', book:'Climb to Fitness', cat:'Endurance'},
+  {t:'Treadwall Training', book:'Climb to Fitness', cat:'Endurance'},
+  {t:'Bouldering Intervals', book:'Climb to Fitness', cat:'Strength'},
+  {t:'World Cup Simulator', book:'Climb to Fitness', cat:'Strength'},
+  {t:'Tales of Power', book:'Climb to Fitness', cat:'Strength'},
+  {t:'4x4s', book:'Climb to Fitness', cat:'Strength'},
+  {t:'Circuits', book:'Climb to Fitness', cat:'Strength'},
+  {t:'Lockoffs', book:'Climb to Fitness', cat:'Strength'},
+  {t:'Peter Pans', book:'Climb to Fitness', cat:'Strength'},
+  {t:'Project, Push-Up, Pull-Up', book:'Climb to Fitness', cat:'Strength'},
+  {t:'Hangboarding 101', book:'Climb to Fitness', cat:'Fingers'},
+  {t:'Hangboard Repeaters', book:'Climb to Fitness', cat:'Fingers'},
+  {t:'Fingerboard Moving Hangs', book:'Climb to Fitness', cat:'Fingers'},
+  {t:'Hangboard Ladders', book:'Climb to Fitness', cat:'Fingers'},
+  {t:'Digit Dialing', book:'Climb to Fitness', cat:'Fingers'},
+  {t:'6-Second Death Drop', book:'Climb to Fitness', cat:'Fingers'},
+  {t:'Perfect Pull-Ups', book:'Climb to Fitness', cat:'Fingers'},
+  {t:'Make Big Moves on the Campus Board', book:'Climb to Fitness', cat:'Power'},
+  {t:'Ladders on the Bachar Ladder', book:'Climb to Fitness', cat:'Power'},
+  {t:'Complete Core', book:'Climb to Fitness', cat:'Core'},
+  {t:'Suspended Circuits', book:'Climb to Fitness', cat:'Core'},
+  {t:'Do the Legwork', book:'Climb to Fitness', cat:'Legs'},
+  {t:'Upper Body Tabata', book:'Climb to Fitness', cat:'Strength'},
+  {t:'Strong Circuits', book:'Climb to Fitness', cat:'Strength'},
+  {t:'Home Improvement', book:'Climb to Fitness', cat:'Strength'},
+  {t:'Freaky Fit', book:'Climb to Fitness', cat:'Strength'},
+  {t:'Targeted Opposition', book:'Climb to Fitness', cat:'Injury Prevention'},
+  {t:'Shoulder Routine', book:'Climb to Fitness', cat:'Injury Prevention'},
+  {t:'Wrist Routine', book:'Climb to Fitness', cat:'Injury Prevention'},
+  {t:'Protect Your Elbows and Shoulders', book:'Climb to Fitness', cat:'Injury Prevention'},
+  {t:'Essential Yoga Poses', book:'Climb to Fitness', cat:'Mobility'},
+  {t:'Shoulder and Hip Strengthening', book:'Climb to Fitness', cat:'Mobility'},
 ];
 
 // Original 24-item self-assessment (not Horst's wording — see chat).
@@ -72,7 +162,8 @@ const App = {
   entries: [],
   assessments: [],
   ui: { tab:'today', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
-        qDraft: {}, qOpen:false, expandedEntry:null, planLoading:false, planError:'', planText:'' },
+        qDraft: {}, qOpen:false, expandedEntry:null, planLoading:false, planError:'', planText:'',
+        editingId:null, planFeedback:'', lastPlanContext:null, showAdherence:false, planAdherencePick:'' },
 
   load() {
     try { const s = localStorage.getItem(LS.settings); if (s) this.settings = Object.assign(this.settings, JSON.parse(s)); } catch(e){}
@@ -104,11 +195,13 @@ function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(
 function freshLogDraft(){
   return { date: todayISO(), type:'Climbing', duration:60, feeling:3, intensity:'Moderate',
     dayTypes:[], dayTypesOther:'', focus:[], wallAngle:[], holdTypes:[],
-    timeClimb:45, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeMobility:0, timeCardio:0,
-    failurePoints:[], failurePointsOther:'', pain:'None', notes:'' };
+    timeClimb:45, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeLegs:0, timeMobility:0, timeCardio:0,
+    workoutStyles:[], exercisesDone:[],
+    failurePoints:[], failurePointsOther:'', pain:'None', notes:'', plan:'', planAdherence:'' };
 }
 function freshAskDraft(){
-  return { minutes:60, feeling:3, location:'Indoor', sessionTypes:['Climbing'], focusMode:'weak', focusPick:'', focusOther:'', focusSecondary:'' };
+  return { minutes:60, feeling:3, location:'Indoor', sessionTypes:['Climbing'], focusMode:'weak', focusPick:'', focusOther:'', focusSecondary:'',
+    sessionStyle:'play', drillCategory:'' };
 }
 
 // ---- Cycle phase calculation ----
@@ -170,7 +263,7 @@ function aggregateByDay(entries){
   const byDate = {};
   entries.forEach(e => {
     const d = byDate[e.date] || {
-      date: e.date, totalMinutes: 0, timeClimb:0, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeMobility:0, timeCardio:0,
+      date: e.date, totalMinutes: 0, timeClimb:0, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeLegs:0, timeMobility:0, timeCardio:0,
       types: [], dayTypes: [], focus: [], intensities: [], pain: 'None', entries: [],
     };
     d.totalMinutes += Number(e.duration) || 0;
@@ -179,6 +272,7 @@ function aggregateByDay(entries){
     d.timeStrength += Number(e.timeStrength) || 0;
     d.timeAntag += Number(e.timeAntag) || 0;
     d.timeCore += Number(e.timeCore) || 0;
+    d.timeLegs += Number(e.timeLegs) || 0;
     d.timeMobility += Number(e.timeMobility) || 0;
     d.timeCardio += Number(e.timeCardio) || 0;
     if (!d.types.includes(e.type)) d.types.push(e.type);
@@ -243,6 +337,28 @@ function computeWeeklyRadarData(entries){
   days.forEach(d => { Object.keys(sums).forEach(k => { sums[k] += d['time'+k[0].toUpperCase()+k.slice(1)] || 0; }); });
   return RADAR_AXES.map(a => ({ axis: a.label, pct: Math.min(150, Math.round((sums[a.key] / WEEKLY_TARGETS[a.key]) * 100)) }));
 }
+
+// Your own guidelines, checked against the trailing 7 days. Framed as a gentle check-in, not a
+// pass/fail — the point is noticing drift, not adding pressure on top of an already full plate.
+function computeWeeklyGuidelines(entries){
+  const days = dayList(entries).filter(d => { const ago = Math.round((new Date(todayISO())-new Date(d.date))/86400000); return ago>=0 && ago<7; });
+  const coreDayCount = days.filter(d => d.timeCore > 0 || d.entries.some(e => (e.exercisesDone||[]).some(x => (EXERCISE_LIBRARY['Core Circuit']||[]).includes(x)))).length;
+  const coreExercises = new Set(); days.forEach(d => d.entries.forEach(e => (e.exercisesDone||[]).forEach(x => { if ((EXERCISE_LIBRARY['Core Circuit']||[]).includes(x)) coreExercises.add(x); })));
+  const legDayCount = days.filter(d => d.entries.some(e => (e.exercisesDone||[]).some(x => (EXERCISE_LIBRARY['Leg Day']||[]).includes(x)))).length;
+  const legExercises = new Set(); days.forEach(d => d.entries.forEach(e => (e.exercisesDone||[]).forEach(x => { if ((EXERCISE_LIBRARY['Leg Day']||[]).includes(x)) legExercises.add(x); })));
+  const tabataDone = days.some(d => d.entries.some(e => (e.workoutStyles||[]).includes('Upper Tabata')));
+  const trxDone = days.some(d => d.entries.some(e => (e.workoutStyles||[]).includes('TRX — Core') || (e.workoutStyles||[]).includes('TRX — Shoulder')));
+  const fullWorkoutCount = days.filter(d => d.entries.some(e => (e.workoutStyles||[]).includes('Full Efficient Workout'))).length;
+
+  return [
+    { label: 'Core (5+ exercises, 3-5x/wk)', ok: coreExercises.size >= 5 && coreDayCount >= 3, detail: `${coreExercises.size} distinct exercises, ${coreDayCount} day(s) this week` },
+    { label: 'Legs (2-3 exercises, 1-2x/wk)', ok: legExercises.size >= 2 && legDayCount >= 1, detail: `${legExercises.size} distinct exercises, ${legDayCount} day(s) this week` },
+    { label: 'Upper Tabata (1x/wk)', ok: tabataDone, detail: tabataDone ? 'done this week' : 'not yet this week' },
+    { label: 'TRX (1x/wk)', ok: trxDone, detail: trxDone ? 'done this week' : 'not yet this week' },
+    { label: 'Full efficient workout (2x/wk)', ok: fullWorkoutCount >= 2, detail: `${fullWorkoutCount} this week` },
+  ];
+}
+
 function renderRadarSVG(data, size){
   size = size || 220;
   const cx = size/2, cy = size/2, r = size/2 - 34;
@@ -354,89 +470,208 @@ function getMostRecentPainStatus(entries){
   return withPain ? withPain.pain : 'None logged yet';
 }
 
+// One-tap way to clear the pain flag without going through the full log form.
+// If something's already logged today, updates that entry's pain field in place (nothing else
+// touched). If nothing's logged today yet, adds a minimal marker entry so the flag has something to point to.
+function clearPainFlag(){
+  const today = todayISO();
+  const todaysEntries = App.entries.filter(e => e.date === today);
+  if (todaysEntries.length > 0) {
+    todaysEntries[todaysEntries.length - 1].pain = 'None';
+  } else {
+    App.entries.push(Object.assign(freshLogDraft(), { id: uid(), date: today, type:'Rest', duration:0,
+      timeClimb:0, focus:[], wallAngle:[], holdTypes:[], failurePoints:[], dayTypes:[], intensity:'',
+      pain:'None', notes:'Pain flag cleared via quick action.' }));
+  }
+  App.entries.sort((a,b)=> a.date.localeCompare(b.date));
+  App.saveEntries();
+  App.toast('Pain flag cleared');
+  App.render();
+}
+
+// ---- Plan export / save-to-log (so a generated plan is never just stuck in memory) ----
+function openPlanAsText(){
+  if (!App.ui.planText) return;
+  const blob = new Blob([App.ui.planText], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+function savePlanAsImage(){
+  if (!App.ui.planText) return;
+  const width = 640, padding = 28, lineHeight = 22, fontSize = 15;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) { App.toast('Image export not supported in this browser'); return; }
+  ctx.font = fontSize + 'px monospace';
+  // wrap text to fit width
+  const maxCharsPerLine = Math.floor((width - padding*2) / (fontSize*0.6));
+  const lines = [];
+  App.ui.planText.split('\n').forEach(paragraph => {
+    if (paragraph.length === 0) { lines.push(''); return; }
+    let line = '';
+    paragraph.split(' ').forEach(word => {
+      if ((line + ' ' + word).trim().length > maxCharsPerLine) { lines.push(line); line = word; }
+      else { line = (line + ' ' + word).trim(); }
+    });
+    if (line) lines.push(line);
+  });
+  const height = padding*2 + lineHeight*(lines.length + 2);
+  canvas.width = width; canvas.height = height;
+  ctx.fillStyle = COLORS_JS.bg; ctx.fillRect(0,0,width,height);
+  ctx.fillStyle = COLORS_JS.gold; ctx.font = 'bold 18px sans-serif';
+  ctx.fillText('Beta Log — ' + todayISO(), padding, padding + 4);
+  ctx.fillStyle = COLORS_JS.text; ctx.font = fontSize + 'px monospace';
+  lines.forEach((line, i) => { ctx.fillText(line, padding, padding + lineHeight*2 + i*lineHeight); });
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'beta-log-plan-' + todayISO() + '.png';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  });
+}
+const COLORS_JS = { bg:'#17161B', gold:'#CC9B3C', text:'#EEE9E1' };
+function setPlanAdherence(v){ App.ui.planAdherencePick = v; App.render(); }
+function savePlanToLog(){
+  const today = todayISO();
+  const todaysEntries = App.entries.filter(e => e.date === today);
+  if (todaysEntries.length > 0) {
+    const target = todaysEntries[todaysEntries.length - 1];
+    target.plan = App.ui.planText; target.planAdherence = App.ui.planAdherencePick;
+  } else {
+    const d = App.ui.askDraft;
+    App.entries.push(Object.assign(freshLogDraft(), {
+      id: uid(), date: today, type: d.sessionTypes.includes('Climbing') ? 'Climbing' : (d.sessionTypes[0] || 'Strength'),
+      duration: Number(d.minutes) || 60, feeling: d.feeling,
+      plan: App.ui.planText, planAdherence: App.ui.planAdherencePick,
+      notes: 'Logged from a generated plan.',
+    }));
+  }
+  App.entries.sort((a,b)=> a.date.localeCompare(b.date));
+  App.saveEntries();
+  App.ui.showAdherence = false; App.ui.planAdherencePick = '';
+  App.toast('Added to today\u2019s log');
+  App.render();
+}
+
 // ---- Claude API call ----
-async function askClaude(){
+async function askClaude(feedback){
   const key = (App.settings.apiKey||'').trim();
   if (!key) { App.ui.planError = 'Add your Anthropic API key in Settings first.'; App.render(); return; }
-  App.ui.planLoading = true; App.ui.planError=''; App.ui.planText=''; App.render();
+  App.ui.planLoading = true; App.ui.planError='';
+  if (!feedback) App.ui.planText = '';
+  App.render();
 
-  const cycle = getCycleState(App.settings);
-  const guidance = PHASE_GUIDANCE[cycle.phaseName];
-  const flags = detectPatterns(App.entries);
-  const weak = getWeakPointProfile();
-  const d = App.ui.askDraft;
+  let sys, messages;
 
-  const recent = dayList(App.entries).slice(0,14).reverse().map(d => {
-    const cls = classifyDay(d);
-    const failureStr = d.entries.flatMap(e => [].concat(e.failurePoints||[])).join(', ');
-    const parts = [`${d.totalMinutes}min total`, cls];
-    if (d.dayTypes.length) parts.push('day type: '+d.dayTypes.join('/'));
-    if (d.intensities.length) parts.push('intensity: '+d.intensities.join('/'));
-    if (d.focus.length) parts.push('focus: '+d.focus.join(', '));
-    parts.push(`time — climb:${d.timeClimb} fingers:${d.timeFingers} strength:${d.timeStrength} antag:${d.timeAntag} core:${d.timeCore} mobility:${d.timeMobility} cardio:${d.timeCardio}`);
-    if (failureStr) parts.push('broke down on: '+failureStr);
-    if (d.pain !== 'None') parts.push('PAIN: '+d.pain);
-    return `${d.date}: ${parts.join(', ')}`;
-  }).join('\n') || 'No prior entries yet.';
-
-  const mostRecentPain = getMostRecentPainStatus(App.entries);
-  const tmpl = compareToWeeklyTemplate(App.entries);
-  const tmplLine = tmpl.notes.length ? tmpl.notes.join(' ') : 'On track with the usual weekly rhythm so far.';
-
-  let focusLine = '';
-  if (d.focusMode === 'other' && d.focusOther.trim()) {
-    focusLine = d.focusOther.trim();
-  } else if (d.focusMode === 'weak' && weak.categoryRank) {
-    focusLine = `Weakest category from self-assessment: ${weak.categoryRank[0][0]} (avg ${weak.categoryRank[0][1].toFixed(1)}/5). Least-worked focus areas in the log: ${weak.leastWorked.join(', ')}.`;
-  } else if (d.focusPick) {
-    focusLine = d.focusPick;
+  if (feedback && App.ui.lastPlanContext) {
+    // Regenerating with feedback: reuse the exact prior request + the plan Claude gave, then ask for the adjustment.
+    sys = App.ui.lastPlanContext.sys;
+    messages = [
+      { role:'user', content: App.ui.lastPlanContext.userMsg },
+      { role:'assistant', content: App.ui.planText },
+      { role:'user', content: `Adjust that plan: ${feedback}` },
+    ];
   } else {
-    focusLine = "Coach's choice based on the log and patterns below.";
+    const cycle = getCycleState(App.settings);
+    const guidance = PHASE_GUIDANCE[cycle.phaseName];
+    const flags = detectPatterns(App.entries);
+    const weak = getWeakPointProfile();
+    const d = App.ui.askDraft;
+
+    const recent = dayList(App.entries).slice(0,14).reverse().map(d => {
+      const cls = classifyDay(d);
+      const failureStr = d.entries.flatMap(e => [].concat(e.failurePoints||[])).join(', ');
+      const parts = [`${d.totalMinutes}min total`, cls];
+      if (d.dayTypes.length) parts.push('day type: '+d.dayTypes.join('/'));
+      if (d.intensities.length) parts.push('intensity: '+d.intensities.join('/'));
+      if (d.focus.length) parts.push('focus: '+d.focus.join(', '));
+      parts.push(`time — climb:${d.timeClimb} fingers:${d.timeFingers} strength:${d.timeStrength} antag:${d.timeAntag} core:${d.timeCore} mobility:${d.timeMobility} cardio:${d.timeCardio}`);
+      if (failureStr) parts.push('broke down on: '+failureStr);
+      if (d.pain !== 'None') parts.push('PAIN: '+d.pain);
+      return `${d.date}: ${parts.join(', ')}`;
+    }).join('\n') || 'No prior entries yet.';
+
+    const mostRecentPain = getMostRecentPainStatus(App.entries);
+    const tmpl = compareToWeeklyTemplate(App.entries);
+    const tmplLine = tmpl.notes.length ? tmpl.notes.join(' ') : 'On track with the usual weekly rhythm so far.';
+    const guidelines = computeWeeklyGuidelines(App.entries);
+    const guidelineLine = guidelines.filter(g=>!g.ok).map(g=>g.label).join(', ') || 'all on track this week';
+
+    let focusLine = '';
+    if (d.focusMode === 'other' && d.focusOther.trim()) {
+      focusLine = d.focusOther.trim();
+    } else if (d.focusMode === 'weak' && weak.categoryRank) {
+      focusLine = `Weakest category from self-assessment: ${weak.categoryRank[0][0]} (avg ${weak.categoryRank[0][1].toFixed(1)}/5). Least-worked focus areas in the log: ${weak.leastWorked.join(', ')}.`;
+    } else if (d.focusPick) {
+      focusLine = d.focusPick;
+    } else {
+      focusLine = "Coach's choice based on the log and patterns below.";
+    }
+    if (d.focusSecondary) focusLine += ` Secondary focus: ${d.focusSecondary}.`;
+
+    const drillPool = d.drillCategory ? DRILL_LIBRARY.filter(x => x.cat === d.drillCategory) : DRILL_LIBRARY;
+    const drillLine = d.sessionTypes.includes('Climbing')
+      ? (d.sessionStyle === 'drill'
+          ? `Wants a specific named drill for the climbing portion${d.drillCategory ? ' (category: '+d.drillCategory+')' : ''}. Pick ONE from the list below that fits today's context and state its exact title and source book so they can look it up in their own copy. Do not invent a drill name that isn't in this list, and do not attempt to describe or explain the drill's actual instructions — they'll look those up themselves:\n` + drillPool.map(x=>`- "${x.t}" (${x.book}, ${x.cat})`).join('\n')
+          : 'Just wants to play/climb today — keep the climbing portion open and unstructured (pick routes/problems that sound fun, no assigned drill), while still following the structure requirement below for the non-climbing pieces.')
+      : '';
+
+    sys = "You are an experienced rock climbing training coach, working with an intermediate climber who also " +
+      "has a full-time job, regular recovery-program meetings, and therapy — respect their time budget exactly, " +
+      "don't pad the plan, and don't guilt them about anything they've missed. You're given their training cycle " +
+      "phase, a phase-structure guideline, their recent log aggregated by calendar day (a day with multiple logged " +
+      "sub-sessions is already combined into one line — treat it as one day, not several), detected training " +
+      "patterns, their own weekly strength-training guidelines, and today's context. Give a single, specific, " +
+      "concrete plan for today's session, sized to the exact time budget given. Use short list format with rough " +
+      "durations/sets/reps, no fluff, no disclaimers. Follow the phase guideline loosely, not rigidly.\n\n" +
+      "STRUCTURE REQUIREMENT for any day that includes climbing: always include, in this order — (1) warmup, " +
+      "(2) climbing volume, (3) some near-limit/limit climbing, (4) climbing-related strength or power exercise, " +
+      "(5) cooldown/stabilizer work. Never drop a piece, but vary the AMOUNT of each — how much climbing, how much " +
+      "antagonist/stabilizer, how much cardio — based on the phase, time budget, and the patterns/weekly-rhythm notes " +
+      "below. Design climbing portions around 4-8 move problems or route laps with real rest between attempts — never " +
+      "a single move drilled to exhaustion, and never just 20 minutes projecting one hard climb. On non-climbing days, " +
+      "build a real mobility/general-movement session, not just a stretch list — and if it fits the time budget, " +
+      "consider drawing from their own workout templates (core circuit, leg day, upper tabata, TRX, or the full " +
+      "efficient-workout structure) rather than inventing something generic.\n\n" +
+      "If a pattern flag or weekly-rhythm note is relevant, address it directly in the plan (e.g. slot in finger work " +
+      "or antagonist work if it's been skipped, or flag that a rest day is overdue) and say briefly why — but weigh " +
+      "this against their bandwidth constraints; a missed guideline on a genuinely busy week is not an emergency. The " +
+      "'Current pain status' line is the authoritative, most recent state — if it says None, do not dwell on older " +
+      "pain mentions elsewhere in the log; if it says anything else, do not prescribe exercise for the affected area, " +
+      "recommend rest and seeing a doctor or physical therapist instead, and only plan around unaffected areas if " +
+      "that still makes sense.";
+
+    const userMsg = `Cycle: ${App.settings.cycleType}, currently in "${cycle.phaseName}" (week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks}, cycle #${cycle.cycleNumber}).\n` +
+      `Phase guideline: ${guidance}\n` +
+      `Indoor grade: ${App.settings.gradeIndoor || 'not set'} · Outdoor grade: ${App.settings.gradeOutdoor || 'not set'}\n` +
+      `Current pain status (most recent entry): ${mostRecentPain}\n` +
+      `This week vs. usual rhythm: ${tmplLine}\n` +
+      `Weekly guidelines not yet hit this week: ${guidelineLine}\n` +
+      (drillLine ? `Climbing portion request: ${drillLine}\n` : '') + `\n` +
+      `Detected patterns: ${flags.length ? flags.join(' | ') : 'none flagged'}\n\n` +
+      `Recent log, one line per calendar day (most recent last):\n${recent}\n\n` +
+      `Today:\n- Minutes available: ${d.minutes}\n- Feeling: ${FEELING_SCALE.find(f=>f.v===d.feeling).l} (${d.feeling}/5)\n` +
+      `- Location: ${d.location}\n- Session type(s) wanted: ${d.sessionTypes.join(', ') || 'no preference'}\n- Priority focus: ${focusLine}\n\n` +
+      `Give today's plan.`;
+
+    messages = [{ role:'user', content: userMsg }];
+    App.ui.lastPlanContext = { sys, userMsg };
   }
-  if (d.focusSecondary) focusLine += ` Secondary focus: ${d.focusSecondary}.`;
-
-  const sys = "You are an experienced rock climbing training coach, working with an intermediate climber. " +
-    "You're given their training cycle phase, a phase-structure guideline, their recent log aggregated by calendar " +
-    "day (a day with multiple logged sub-sessions is already combined into one line — treat it as one day, not " +
-    "several), detected training patterns, and today's context. Give a single, specific, concrete plan for today's " +
-    "session, sized to the exact time budget given. Use short list format with rough durations/sets/reps, no fluff, " +
-    "no disclaimers. Follow the phase guideline loosely, not rigidly.\n\n" +
-    "STRUCTURE REQUIREMENT for any day that includes climbing: always include, in this order — (1) warmup, " +
-    "(2) climbing volume, (3) some near-limit/limit climbing, (4) climbing-related strength or power exercise, " +
-    "(5) cooldown/stabilizer work. Never drop a piece, but vary the AMOUNT of each — how much climbing, how much " +
-    "antagonist/stabilizer, how much cardio — based on the phase, time budget, and the patterns/weekly-rhythm notes " +
-    "below. Design climbing portions around 4-8 move problems or route laps with real rest between attempts — never " +
-    "a single move drilled to exhaustion, and never just 20 minutes projecting one hard climb. On non-climbing days, " +
-    "build a real mobility/general-movement session, not just a stretch list.\n\n" +
-    "If a pattern flag or weekly-rhythm note is relevant, address it directly in the plan (e.g. slot in finger work " +
-    "or antagonist work if it's been skipped, or flag that a rest day is overdue) and say briefly why. The 'Current " +
-    "pain status' line is the authoritative, most recent state — if it says None, do not dwell on older pain " +
-    "mentions elsewhere in the log; if it says anything else, do not prescribe exercise for the affected area, " +
-    "recommend rest and seeing a doctor or physical therapist instead, and only plan around unaffected areas if " +
-    "that still makes sense.";
-
-  const user = `Cycle: ${App.settings.cycleType}, currently in "${cycle.phaseName}" (week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks}, cycle #${cycle.cycleNumber}).\n` +
-    `Phase guideline: ${guidance}\n` +
-    `Indoor grade: ${App.settings.gradeIndoor || 'not set'} · Outdoor grade: ${App.settings.gradeOutdoor || 'not set'}\n` +
-    `Current pain status (most recent entry): ${mostRecentPain}\n` +
-    `This week vs. usual rhythm: ${tmplLine}\n\n` +
-    `Detected patterns: ${flags.length ? flags.join(' | ') : 'none flagged'}\n\n` +
-    `Recent log, one line per calendar day (most recent last):\n${recent}\n\n` +
-    `Today:\n- Minutes available: ${d.minutes}\n- Feeling: ${FEELING_SCALE.find(f=>f.v===d.feeling).l} (${d.feeling}/5)\n` +
-    `- Location: ${d.location}\n- Session type(s) wanted: ${d.sessionTypes.join(', ') || 'no preference'}\n- Priority focus: ${focusLine}\n\n` +
-    `Give today's plan.`;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
       headers: { 'Content-Type':'application/json', 'x-api-key': key, 'anthropic-version':'2023-06-01',
                  'anthropic-dangerous-direct-browser-access':'true' },
-      body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1200, system: sys, messages:[{role:'user', content:user}] }),
+      body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1200, system: sys, messages }),
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error.message || 'API error');
     const text = (data.content||[]).map(b=>b.text||'').join('\n').trim();
     App.ui.planText = text || 'No response came back — try again.';
+    App.ui.planFeedback = '';
   } catch(e) {
     App.ui.planError = 'Could not reach Claude: ' + e.message;
   } finally {
@@ -451,8 +686,16 @@ function pillsHTML(options, selected, onClick, opts){
   const altClass = opts.alt ? ' alt' : '';
   return `<div class="pillrow">${options.map(o => {
     const isActive = Array.isArray(selected) ? selected.includes(o) : selected === o;
-    return `<button type="button" class="${cls}${isActive ? ' active'+altClass : ''}" onclick="${onClick}('${escAttr(o)}')">${o}</button>`;
+    const searchBtn = opts.searchable
+      ? `<span onclick="event.stopPropagation(); searchExercise('${escAttr(o)}')" style="margin-left:6px;opacity:.75;cursor:pointer;" title="Search this">&#128269;</span>`
+      : '';
+    return `<button type="button" class="${cls}${isActive ? ' active'+altClass : ''}" onclick="${onClick}('${escAttr(o)}')">${o}${searchBtn}</button>`;
   }).join('')}</div>`;
+}
+function searchExercise(name){
+  const cleaned = name.replace(/\([^)]*\)/g, '').trim(); // drop parenthetical detail for a cleaner query
+  const url = 'https://www.google.com/search?q=' + encodeURIComponent(cleaned + ' exercise how to');
+  window.open(url, '_blank');
 }
 function escAttr(s){ return String(s).replace(/'/g, "\\'"); }
 function escHtml(s){ return String(s==null?'':s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
@@ -481,7 +724,8 @@ function renderToday(){
   let banners = '';
   const painStatus = getMostRecentPainStatus(App.entries);
   if (painStatus && painStatus !== 'None' && painStatus !== 'None logged yet') {
-    banners += `<div class="banner warn"><b>Pain still flagged:</b> ${escHtml(painStatus)} — from your most recent entry. This stays up (and gets sent with every plan request) until you log a new entry with Pain = None.</div>`;
+    banners += `<div class="banner warn"><b>Pain still flagged:</b> ${escHtml(painStatus)} — from your most recent entry, sent with every plan request.
+      <div style="margin-top:8px;"><button class="btn btn-ghost" style="width:auto;padding:8px 14px;" onclick="clearPainFlag()">Turn off — no pain today</button></div></div>`;
   }
   if (dueCount >= 24) {
     banners += `<div class="banner info"><b>Weak-point check-in due.</b> You've logged ${dueCount} climbing sessions since your last one.
@@ -505,7 +749,8 @@ function renderToday(){
       <input type="number" min="5" max="240" value="${d.minutes}" oninput="App.ui.askDraft.minutes=this.value">
     </div>
     <div class="field"><label>How you're feeling</label>
-      ${pillsHTML(FEELING_SCALE.map(f=>f.l), FEELING_SCALE.find(f=>f.v===d.feeling).l, 'setAskFeeling')}
+      ${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setAskFeeling')}
+      <div class="scale-caption" style="margin-top:2px;"><span>1 = flat</span><span>5 = dialed</span></div>
     </div>
     <div class="field"><label>Where</label>
       ${pillsHTML(['Indoor','Outdoor'], d.location, 'setAskLocation', {sm:true})}
@@ -513,6 +758,14 @@ function renderToday(){
     <div class="field"><label>Session type(s) wanted</label>
       ${pillsHTML(SESSION_TYPE_OPTIONS, d.sessionTypes, 'toggleAskType')}
     </div>
+    ${d.sessionTypes.includes('Climbing') ? `
+    <div class="field"><label>Climbing portion</label>
+      ${pillsHTML(['Just play/climb', 'Give me a drill'], d.sessionStyle==='drill' ? 'Give me a drill' : 'Just play/climb', 'setSessionStyle', {sm:true})}
+      ${d.sessionStyle==='drill' ? `<div style="margin-top:8px;">
+        <p class="small muted" style="margin-bottom:6px;">Optional: narrow it down. I'll name a specific drill from Training for Climbing or Climb to Fitness so you can look it up in your copy.</p>
+        ${pillsHTML(['Technique','Fingers','Power','Power-Endurance','Endurance','Strength','Core','Legs','Injury Prevention','Mobility'], d.drillCategory, 'setDrillCategory', {sm:true})}
+      </div>` : ''}
+    </div>` : ''}
     <div class="field"><label>Priority focus</label>
       ${pillsHTML(['Auto (weak points)', 'Pick a focus area', 'Describe something else'],
         d.focusMode==='weak' ? 'Auto (weak points)' : d.focusMode==='pick' ? 'Pick a focus area' : 'Describe something else',
@@ -526,20 +779,38 @@ function renderToday(){
     </div>
     <button class="btn btn-primary" onclick="askClaude()" ${App.ui.planLoading?'disabled':''}>${App.ui.planLoading ? 'Thinking…' : "Get today's plan"}</button>
     ${App.ui.planError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.planError)}</p>` : ''}
-    ${App.ui.planText ? `<div class="plan-box">${escHtml(App.ui.planText)}</div>` : ''}
+    ${App.ui.planText ? `<div class="plan-box">${escHtml(App.ui.planText)}</div>
+    <div class="pillrow" style="margin-top:10px;">
+      <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="openPlanAsText()">Open as text (new tab)</button>
+      <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="savePlanAsImage()">Save as image</button>
+      <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="App.ui.showAdherence = !App.ui.showAdherence; App.render();">Add this to today's log</button>
+    </div>
+    ${App.ui.showAdherence ? `<div class="field" style="margin-top:10px;">
+      <label>If you already did it (or partly did it) — how close did you end up sticking to this?</label>
+      ${pillsHTML(ADHERENCE_OPTIONS, App.ui.planAdherencePick, 'setPlanAdherence', {sm:true})}
+      <button class="btn btn-secondary" style="margin-top:8px;" onclick="savePlanToLog()" ${App.ui.planAdherencePick ? '' : 'disabled'}>Save to today's entry</button>
+    </div>` : ''}
+    <div class="field" style="margin-top:12px;">
+      <label>Want to adjust this?</label>
+      <textarea placeholder="e.g. swap the finger work for more core, I only actually have 30 min, less bouldering today..." oninput="App.ui.planFeedback=this.value">${escHtml(App.ui.planFeedback)}</textarea>
+      <button class="btn btn-secondary" style="margin-top:8px;" onclick="askClaude(App.ui.planFeedback)" ${App.ui.planLoading || !App.ui.planFeedback.trim() ? 'disabled' : ''}>${App.ui.planLoading ? 'Thinking…' : 'Regenerate with this feedback'}</button>
+    </div>` : ''}
   </div>`;
 }
 
 function renderLog(){
   const d = App.ui.logDraft;
   const isClimbing = d.type === 'Climbing';
+  const isRest = d.type === 'Rest';
+  const editing = !!App.ui.editingId;
   return `
   <div class="card">
-    <h2>Log a session</h2>
+    ${editing ? `<div class="banner info">Editing an existing entry. <button class="btn btn-ghost" style="width:auto;padding:6px 12px;margin-left:8px;" onclick="cancelEdit()">Cancel edit</button></div>` : ''}
+    <h2>${editing ? 'Edit entry' : 'Log a session'}</h2>
     <div class="row2">
       <div class="field"><label>Date</label><input type="date" value="${d.date}" oninput="App.ui.logDraft.date=this.value"></div>
       <div class="field"><label>Type</label>
-        <select onchange="App.ui.logDraft.type=this.value; App.render();">
+        <select onchange="setLogType(this.value)">
           ${SESSION_TYPE_OPTIONS.concat(['Rest']).map(t=>`<option value="${t}" ${d.type===t?'selected':''}>${t}</option>`).join('')}
         </select>
       </div>
@@ -547,7 +818,7 @@ function renderLog(){
     <div class="field"><label>Duration (minutes)</label>
       <input type="number" min="0" max="300" value="${d.duration}" oninput="App.ui.logDraft.duration=this.value">
     </div>
-    <div class="field"><label>Feeling</label>${pillsHTML(FEELING_SCALE.map(f=>f.l), FEELING_SCALE.find(f=>f.v===d.feeling).l, 'setLogFeeling')}</div>
+    <div class="field"><label>How'd it go (1 = flat, 5 = dialed)</label>${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setLogFeeling')}</div>
     ${isClimbing ? `
     <div class="field"><label>Intensity</label>${pillsHTML(INTENSITY_OPTIONS, d.intensity, 'setLogIntensity', {sm:true})}</div>
     <div class="field"><label>Day type</label>${pillsHTML(DAY_TYPES, d.dayTypes, 'toggleLogDayType', {sm:true})}</div>
@@ -580,12 +851,26 @@ function renderLog(){
       ${pillsHTML(FAILURE_POINT_OPTIONS, d.failurePoints, 'toggleLogFailurePoint', {sm:true})}
       <textarea style="margin-top:8px;" placeholder="Any detail worth adding..." oninput="App.ui.logDraft.failurePointsOther=this.value">${escHtml(d.failurePointsOther)}</textarea>
     </div>
-    ` : ''}
+    ` : isRest ? '' : `
+    <div class="field"><label>Workout style</label>${pillsHTML(WORKOUT_STYLES, d.workoutStyles, 'toggleLogWorkoutStyle', {sm:true})}</div>
+    ${d.workoutStyles.length ? `
+    <div class="field"><label>What did you do</label>
+      ${d.workoutStyles.map(style => `<div class="small muted" style="margin:8px 0 4px;">${escHtml(style)}</div>${pillsHTML(EXERCISE_LIBRARY[style]||[], d.exercisesDone, 'toggleLogExercise', {sm:true, searchable:true})}`).join('')}
+    </div>` : `<p class="small muted">Pick a workout style above to see exercise options, or just log time + notes below.</p>`}
+    <div class="row2">
+      <div class="field"><label>Strength</label><input type="number" min="0" value="${d.timeStrength}" oninput="App.ui.logDraft.timeStrength=this.value"></div>
+      <div class="field"><label>Core</label><input type="number" min="0" value="${d.timeCore}" oninput="App.ui.logDraft.timeCore=this.value"></div>
+      <div class="field"><label>Antagonist/stabilizer</label><input type="number" min="0" value="${d.timeAntag}" oninput="App.ui.logDraft.timeAntag=this.value"></div>
+      <div class="field"><label>Mobility</label><input type="number" min="0" value="${d.timeMobility}" oninput="App.ui.logDraft.timeMobility=this.value"></div>
+      <div class="field"><label>Cardio</label><input type="number" min="0" value="${d.timeCardio}" oninput="App.ui.logDraft.timeCardio=this.value"></div>
+      <div class="field"><label>Finger strength</label><input type="number" min="0" value="${d.timeFingers}" oninput="App.ui.logDraft.timeFingers=this.value"></div>
+    </div>
+    `}
     <div class="field"><label>Pain or discomfort</label>${pillsHTML(PAIN_OPTIONS, d.pain, 'setLogPain', {sm:true})}</div>
     <div class="field"><label>Notes</label>
       <textarea placeholder="Anything else worth remembering..." oninput="App.ui.logDraft.notes=this.value">${escHtml(d.notes)}</textarea>
     </div>
-    <button class="btn btn-primary" onclick="submitLog()">Save entry</button>
+    <button class="btn btn-primary" onclick="submitLog()">${editing ? 'Save changes' : 'Save entry'}</button>
   </div>`;
 }
 
@@ -641,11 +926,16 @@ function renderHistory(){
       <div class="small" style="margin-top:4px;">${r.isFuture ? '—' : escHtml(r.actual)}</div>
       <div class="small muted">(usually ${r.template})</div>
     </div>`).join('');
+  const guidelines = computeWeeklyGuidelines(entries);
+  const guidelineRows = guidelines.map(g => `<div class="bar-row" style="align-items:flex-start;">
+      <div style="width:20px;flex:none;color:${g.ok?'var(--teal)':'var(--muted)'};font-weight:700;">${g.ok?'✓':'—'}</div>
+      <div style="flex:1;"><div class="small">${escHtml(g.label)}</div><div class="small muted">${escHtml(g.detail)}</div></div>
+    </div>`).join('');
 
   const entryRows = entries.map(e => `
     <div class="entry">
       <button class="entry-head" onclick="toggleEntry('${e.id}')">
-        <span><b>${e.date}</b> &nbsp;<span class="muted">${e.type}${e.type==='Climbing' ? ' · '+e.duration+'min · '+FEELING_SCALE.find(f=>f.v==e.feeling).l : ' · '+e.duration+'min'}</span></span>
+        <span><b>${e.date}</b> &nbsp;<span class="muted">${e.type}${e.type==='Climbing' ? ' · '+e.duration+'min · feeling '+e.feeling+'/5' : ' · '+e.duration+'min'}</span></span>
         <span>${App.ui.expandedEntry===e.id?'▲':'▼'}</span>
       </button>
       ${App.ui.expandedEntry===e.id ? `<div class="entry-body">
@@ -655,10 +945,13 @@ function renderHistory(){
         ${(e.focus&&e.focus.length)?`<p><b>Focus:</b> ${e.focus.join(', ')}</p>`:''}
         ${(e.wallAngle&&e.wallAngle.length)?`<p><b>Wall angle:</b> ${e.wallAngle.join(', ')}</p>`:''}
         ${(e.holdTypes&&e.holdTypes.length)?`<p><b>Holds:</b> ${e.holdTypes.join(', ')}</p>`:''}
+        ${(e.workoutStyles&&e.workoutStyles.length)?`<p><b>Workout style:</b> ${e.workoutStyles.join(', ')}</p>`:''}
+        ${(e.exercisesDone&&e.exercisesDone.length)?`<p><b>Exercises done:</b> ${e.exercisesDone.join(', ')}</p>`:''}
         ${(e.failurePoints&&e.failurePoints.length)?`<p><b>Broke down on:</b> ${e.failurePoints.join(', ')}</p>`:''}
         ${e.failurePointsOther?`<p><b>Detail:</b> ${escHtml(e.failurePointsOther)}</p>`:''}
         ${e.pain&&e.pain!=='None'?`<p style="color:var(--red)"><b>Pain:</b> ${e.pain}</p>`:''}
         ${e.notes?`<p><b>Notes:</b> ${escHtml(e.notes)}</p>`:''}
+        <button class="btn btn-ghost" style="width:auto;padding:8px 14px;margin-top:8px;" onclick="editEntry('${e.id}')">Edit this entry</button>
       </div>` : ''}
     </div>`).join('');
 
@@ -680,6 +973,11 @@ function renderHistory(){
     <h2>Weekly balance</h2>
     <p class="small muted">Trailing 7 days vs. rough weekly targets. Dashed ring = target; gold = you.</p>
     <div style="display:flex;justify-content:center;">${renderRadarSVG(radarData)}</div>
+  </div>
+  <div class="card">
+    <h2>Your weekly guidelines</h2>
+    <p class="small muted">These are things to touch base on, not requirements — a check mark just means it's happened this week; a dash isn't a failure, especially on a full week.</p>
+    <div class="barlist">${guidelineRows}</div>
   </div>
   <div class="card">
     <h2>This week vs. your usual rhythm</h2>
@@ -764,7 +1062,7 @@ function renderQuestionnaire(){
 }
 
 // ---- Event handlers (called from inline onclick in templates) ----
-function setAskFeeling(label){ App.ui.askDraft.feeling = FEELING_SCALE.find(f=>f.l===label).v; App.render(); }
+function setAskFeeling(v){ App.ui.askDraft.feeling = Number(v); App.render(); }
 function setAskLocation(loc){ App.ui.askDraft.location = loc; App.render(); }
 function toggleAskType(t){ const arr = App.ui.askDraft.sessionTypes; const i = arr.indexOf(t);
   if (i>-1) arr.splice(i,1); else arr.push(t); App.render(); }
@@ -777,15 +1075,24 @@ function setFocusSecondary(area){
   App.ui.askDraft.focusSecondary = App.ui.askDraft.focusSecondary === area ? '' : area;
   App.render();
 }
+function setSessionStyle(v){ App.ui.askDraft.sessionStyle = v==='Give me a drill' ? 'drill' : 'play'; App.render(); }
+function setDrillCategory(c){ App.ui.askDraft.drillCategory = App.ui.askDraft.drillCategory === c ? '' : c; App.render(); }
 
-function setLogFeeling(label){ App.ui.logDraft.feeling = FEELING_SCALE.find(f=>f.l===label).v; App.render(); }
+function setLogFeeling(v){ App.ui.logDraft.feeling = Number(v); App.render(); }
 function setLogIntensity(v){ App.ui.logDraft.intensity = v; App.render(); }
 function setLogPain(v){ App.ui.logDraft.pain = v; App.render(); }
+function setLogType(t){
+  App.ui.logDraft.type = t;
+  if (TYPE_TO_WORKOUT_STYLE[t] && App.ui.logDraft.workoutStyles.length === 0) App.ui.logDraft.workoutStyles = [TYPE_TO_WORKOUT_STYLE[t]];
+  App.render();
+}
 function toggleLogFocus(a){ toggleArr(App.ui.logDraft.focus, a); App.render(); }
 function toggleLogWall(a){ toggleArr(App.ui.logDraft.wallAngle, a); App.render(); }
 function toggleLogHold(a){ toggleArr(App.ui.logDraft.holdTypes, a); App.render(); }
 function toggleLogDayType(a){ toggleArr(App.ui.logDraft.dayTypes, a); App.render(); }
 function toggleLogFailurePoint(a){ toggleArr(App.ui.logDraft.failurePoints, a); App.render(); }
+function toggleLogWorkoutStyle(a){ toggleArr(App.ui.logDraft.workoutStyles, a); App.render(); }
+function toggleLogExercise(a){ toggleArr(App.ui.logDraft.exercisesDone, a); App.render(); }
 function setClimbLocation(loc){ App.ui.climbLocationDraft = loc; App.render(); }
 function toggleArr(arr, v){ const i=arr.indexOf(v); if (i>-1) arr.splice(i,1); else arr.push(v); }
 
@@ -836,10 +1143,26 @@ function importData(file){
 
 const TYPE_TO_TIME_FIELD = {
   'Antagonist / Stabilizer': 'timeAntag', 'Mobility / Stretch': 'timeMobility', 'Strength': 'timeStrength', 'Cardio': 'timeCardio',
+  'Core Workout': 'timeCore', 'Leg Workout': 'timeLegs',
 };
+const TYPE_TO_WORKOUT_STYLE = { 'Core Workout': 'Core Circuit', 'Leg Workout': 'Leg Day' };
+function editEntry(id){
+  const e = App.entries.find(x => x.id === id);
+  if (!e) return;
+  App.ui.logDraft = Object.assign(freshLogDraft(), JSON.parse(JSON.stringify(e)));
+  App.ui.climbsDraft = (e.climbs || []).slice();
+  App.ui.editingId = id;
+  App.setTab('log');
+}
+function cancelEdit(){
+  App.ui.editingId = null;
+  App.ui.logDraft = freshLogDraft();
+  App.ui.climbsDraft = [];
+  App.render();
+}
 function submitLog(){
   const d = App.ui.logDraft;
-  const entry = Object.assign({ id: uid() }, d, { climbs: App.ui.climbsDraft.slice() });
+  const entry = Object.assign({}, d, { id: App.ui.editingId || uid(), climbs: App.ui.climbsDraft.slice() });
   if (entry.type !== 'Climbing') {
     // These fields are hidden from the form for non-climbing entries, but freshLogDraft() still
     // carries default values for them — zero/clear them explicitly so stale defaults (e.g. a leftover
@@ -851,13 +1174,21 @@ function submitLog(){
   // map that into the matching time-bucket so day-aggregation, patterns, and the radar chart see it.
   const bucket = TYPE_TO_TIME_FIELD[entry.type];
   if (bucket && !entry[bucket]) entry[bucket] = Number(entry.duration) || 0;
-  App.entries = App.entries.filter(e => !(e.date===entry.date && e.type===entry.type)).concat([entry])
-    .sort((a,b)=> a.date.localeCompare(b.date));
+
+  if (App.ui.editingId) {
+    // Editing an existing entry (e.g. fixing a mis-entered date) — replace by id, no date/type dedupe.
+    App.entries = App.entries.map(e => e.id === App.ui.editingId ? entry : e).sort((a,b)=> a.date.localeCompare(b.date));
+    App.toast('Entry updated');
+  } else {
+    App.entries = App.entries.filter(e => !(e.date===entry.date && e.type===entry.type)).concat([entry])
+      .sort((a,b)=> a.date.localeCompare(b.date));
+    App.toast('Saved to your log');
+  }
   App.saveEntries();
   App.ui.logDraft = freshLogDraft();
   App.ui.climbsDraft = [];
   App.ui.climbLocationDraft = 'Indoor';
-  App.toast('Saved to your log');
+  App.ui.editingId = null;
   App.setTab('history');
 }
 
@@ -894,6 +1225,9 @@ App.render();
 
 // Explicit global exposure (belt-and-suspenders for inline onclick handlers across environments)
 window.App = App;
+window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
+window.EXERCISE_LIBRARY = EXERCISE_LIBRARY; window.WORKOUT_STYLES = WORKOUT_STYLES;
+window.FOCUS_AREAS = FOCUS_AREAS; window.ADHERENCE_OPTIONS = ADHERENCE_OPTIONS;
 window.setAskFeeling = setAskFeeling; window.toggleAskType = toggleAskType; window.setAskLocation = setAskLocation;
 window.setFocusMode = setFocusMode; window.setFocusPick = setFocusPick; window.setFocusSecondary = setFocusSecondary;
 window.setLogFeeling = setLogFeeling; window.setLogIntensity = setLogIntensity; window.setLogPain = setLogPain;
@@ -905,3 +1239,5 @@ window.toggleEntry = toggleEntry; window.setCycleType = setCycleType; window.sav
 window.openQuestionnaire = openQuestionnaire; window.closeQuestionnaire = closeQuestionnaire;
 window.setQAnswer = setQAnswer; window.submitAssessment = submitAssessment; window.askClaude = askClaude;
 window.applyPhaseOverride = applyPhaseOverride; window.exportData = exportData; window.importData = importData;
+window.clearPainFlag = clearPainFlag; window.editEntry = editEntry; window.cancelEdit = cancelEdit;
+window.toggleLogWorkoutStyle = toggleLogWorkoutStyle; window.toggleLogExercise = toggleLogExercise;
