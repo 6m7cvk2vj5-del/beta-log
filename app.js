@@ -9,6 +9,8 @@ const FEELING_SCALE = [{v:1,l:'Flat'},{v:2,l:'Off'},{v:3,l:'Steady'},{v:4,l:'Str
 const INTENSITY_OPTIONS = ['Easy','Moderate','Hard','Max effort'];
 const SESSION_TYPE_OPTIONS = ['Climbing','Antagonist / Stabilizer','Mobility / Stretch','Strength'];
 const PAIN_OPTIONS = ['None','Mild, manageable','Recurring issue','Something new'];
+const DAY_TYPES = ['Indoor','Outdoor','Bouldering','Sport/Rope','Project','Power','Power-Endurance','Skills/Technique','Fun/Social'];
+const FAILURE_POINT_OPTIONS = ["Grip/forearms gave out","Footwork broke down","Lost the sequence","Couldn't commit to the move","Got pumped","Couldn't reach the hold","Feet cut loose","Mental — backed off"];
 
 // Original 24-item self-assessment (not Horst's wording — see chat).
 // Category cycles every 3 items: mental, technique, physical — matching the pattern requested.
@@ -54,16 +56,22 @@ const LS = {
 };
 
 const App = {
-  settings: { apiKey:'', cycleType:'3-2-1', cycleStartDate: todayISO(), grade:'' },
+  settings: { apiKey:'', cycleType:'3-2-1', cycleStartDate: todayISO(), gradeIndoor:'', gradeOutdoor:'' },
   entries: [],
   assessments: [],
-  ui: { tab:'today', logDraft: freshLogDraft(), climbsDraft: [], askDraft: freshAskDraft(),
+  ui: { tab:'today', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
         qDraft: {}, qOpen:false, expandedEntry:null, planLoading:false, planError:'', planText:'' },
 
   load() {
     try { const s = localStorage.getItem(LS.settings); if (s) this.settings = Object.assign(this.settings, JSON.parse(s)); } catch(e){}
     try { const e = localStorage.getItem(LS.entries); if (e) this.entries = JSON.parse(e); } catch(e){}
     try { const a = localStorage.getItem(LS.assessments); if (a) this.assessments = JSON.parse(a); } catch(e){}
+    // schema migration: old single "grade" field -> gradeIndoor
+    if (this.settings.grade && !this.settings.gradeIndoor) {
+      this.settings.gradeIndoor = this.settings.grade;
+      delete this.settings.grade;
+      this.saveSettings();
+    }
   },
   saveSettings() { localStorage.setItem(LS.settings, JSON.stringify(this.settings)); },
   saveEntries() { localStorage.setItem(LS.entries, JSON.stringify(this.entries)); },
@@ -83,11 +91,11 @@ function todayISO(){ return new Date().toISOString().slice(0,10); }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function freshLogDraft(){
   return { date: todayISO(), type:'Climbing', duration:60, feeling:3, intensity:'Moderate',
-    focus:[], wallAngle:[], holdTypes:[], timeClimb:45, timeStrength:0, timeAntag:0, timeCore:0, timeMobility:0,
-    failurePoints:'', pain:'None', notes:'' };
+    dayTypes:[], dayTypesOther:'', focus:[], wallAngle:[], holdTypes:[], timeClimb:45, timeStrength:0, timeAntag:0, timeCore:0, timeMobility:0,
+    failurePoints:[], failurePointsOther:'', pain:'None', notes:'' };
 }
 function freshAskDraft(){
-  return { minutes:60, feeling:3, sessionTypes:['Climbing'], focusMode:'weak', focusPick:'', focusOther:'' };
+  return { minutes:60, feeling:3, location:'Indoor', sessionTypes:['Climbing'], focusMode:'weak', focusPick:'', focusOther:'', focusSecondary:'' };
 }
 
 // ---- Cycle phase calculation ----
@@ -115,6 +123,31 @@ function getCycleState(settings){
     acc += p.weeks;
   }
   return { phaseName: phases[0].name, weekOfPhase:1, phaseLengthWeeks: phases[0].weeks, cycleNumber, weekOfCycle:1, totalWeeksInCycle: totalWeeks };
+}
+
+// Manually pin the current phase/week (e.g. "I just finished 3 weeks, doing a taper/project week now",
+// or "jump into week 2 of this phase"). Works by re-deriving cycleStartDate so today lands exactly on the
+// requested week — normal date math then carries forward correctly from here.
+function setPhaseManually(phaseName, weekOfPhase){
+  const phases = getCyclePhases(App.settings.cycleType);
+  const phase = phases.find(p => p.name === phaseName);
+  if (!phase) return;
+  weekOfPhase = Math.max(1, Math.min(phase.weeks, Number(weekOfPhase) || 1));
+  let acc = 0;
+  for (const p of phases) { if (p.name === phaseName) break; acc += p.weeks; }
+  const weekInCycle = acc + (weekOfPhase - 1);
+  const daysBack = weekInCycle * 7;
+  const newStart = new Date(todayISO() + 'T00:00:00');
+  newStart.setDate(newStart.getDate() - daysBack);
+  App.settings.cycleStartDate = newStart.toISOString().slice(0,10);
+  App.saveSettings();
+  App.toast('Set to ' + phaseName + ', week ' + weekOfPhase);
+  App.setTab('today');
+}
+function applyPhaseOverride(){
+  const phaseName = document.getElementById('overridePhase').value;
+  const week = document.getElementById('overrideWeek').value;
+  setPhaseManually(phaseName, week);
 }
 
 // ---- Pattern detection (simple, transparent heuristics) ----
@@ -165,6 +198,12 @@ function climbingSessionsSinceLastAssessment(){
   return App.entries.filter(e => e.type === 'Climbing' && e.date > cutoff).length;
 }
 
+function getMostRecentPainStatus(entries){
+  const sorted = [...entries].sort((a,b)=> b.date.localeCompare(a.date));
+  const withPain = sorted.find(e => e.pain);
+  return withPain ? withPain.pain : 'None logged yet';
+}
+
 // ---- Claude API call ----
 async function askClaude(){
   const key = (App.settings.apiKey||'').trim();
@@ -178,10 +217,14 @@ async function askClaude(){
   const d = App.ui.askDraft;
 
   const recent = [...App.entries].sort((a,b)=> b.date.localeCompare(a.date)).slice(0,14).reverse().map(e => {
-    const t = e.type==='Climbing' ? `${e.duration}min, ${e.intensity}, feeling ${e.feeling}/5, focus: ${(e.focus||[]).join(', ')||'none'}${e.failurePoints?', failure points: '+e.failurePoints:''}${e.pain && e.pain!=='None' ? ', PAIN: '+e.pain : ''}`
+    const failureStr = [].concat(e.failurePoints||[], e.failurePointsOther||[]).filter(Boolean).join(', ');
+    const dayTypeStr = [].concat(e.dayTypes||[], e.dayTypesOther||[]).filter(Boolean).join('/');
+    const t = e.type==='Climbing' ? `${e.duration}min, ${e.intensity}, day type: ${dayTypeStr||'unspecified'}, feeling ${e.feeling}/5, focus: ${(e.focus||[]).join(', ')||'none'}${failureStr?', broke down on: '+failureStr:''}${e.pain && e.pain!=='None' ? ', PAIN: '+e.pain : ''}`
       : `${e.type}${e.notes ? ' - '+e.notes : ''}`;
     return `${e.date}: ${t}`;
   }).join('\n') || 'No prior entries yet.';
+
+  const mostRecentPain = getMostRecentPainStatus(App.entries);
 
   let focusLine = '';
   if (d.focusMode === 'other' && d.focusOther.trim()) {
@@ -193,6 +236,7 @@ async function askClaude(){
   } else {
     focusLine = "Coach's choice based on the log and patterns below.";
   }
+  if (d.focusSecondary) focusLine += ` Secondary focus: ${d.focusSecondary}.`;
 
   const sys = "You are an experienced rock climbing training coach, working with an intermediate climber. " +
     "You're given their training cycle phase, a phase-structure guideline, their recent session log, detected " +
@@ -202,18 +246,19 @@ async function askClaude(){
     "laps with real rest between attempts — never a single move drilled to exhaustion, and never just 20 minutes " +
     "projecting one hard climb. On non-climbing days, build a real mobility/general-movement session, not just a " +
     "stretch list. If a pattern flag below is relevant, address it directly in the plan (e.g. slot in antagonist " +
-    "work if it's been skipped) and say briefly why. If anything in the log or today's context describes pain " +
-    "(especially nerve pain, sharp pain, or anything beyond normal muscle fatigue/soreness), do not prescribe " +
-    "exercise for the affected area — recommend rest and seeing a doctor or physical therapist instead, and only " +
-    "plan around unaffected areas if that still makes sense.";
+    "work if it's been skipped) and say briefly why. The 'Current pain status' line is the authoritative, most " +
+    "recent state — if it says None, do not dwell on older pain mentions elsewhere in the log; if it says anything " +
+    "else, do not prescribe exercise for the affected area, recommend rest and seeing a doctor or physical " +
+    "therapist instead, and only plan around unaffected areas if that still makes sense.";
 
   const user = `Cycle: ${App.settings.cycleType}, currently in "${cycle.phaseName}" (week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks}, cycle #${cycle.cycleNumber}).\n` +
     `Phase guideline: ${guidance}\n` +
-    `Current grade: ${App.settings.grade || 'not set'}\n\n` +
+    `Indoor grade: ${App.settings.gradeIndoor || 'not set'} · Outdoor grade: ${App.settings.gradeOutdoor || 'not set'}\n` +
+    `Current pain status (most recent entry): ${mostRecentPain}\n\n` +
     `Detected patterns: ${flags.length ? flags.join(' | ') : 'none flagged'}\n\n` +
     `Recent log (most recent last):\n${recent}\n\n` +
     `Today:\n- Minutes available: ${d.minutes}\n- Feeling: ${FEELING_SCALE.find(f=>f.v===d.feeling).l} (${d.feeling}/5)\n` +
-    `- Session type(s) wanted: ${d.sessionTypes.join(', ') || 'no preference'}\n- Priority focus: ${focusLine}\n\n` +
+    `- Location: ${d.location}\n- Session type(s) wanted: ${d.sessionTypes.join(', ') || 'no preference'}\n- Priority focus: ${focusLine}\n\n` +
     `Give today's plan.`;
 
   try {
@@ -269,6 +314,10 @@ function renderToday(){
   const weak = getWeakPointProfile();
 
   let banners = '';
+  const painStatus = getMostRecentPainStatus(App.entries);
+  if (painStatus && painStatus !== 'None' && painStatus !== 'None logged yet') {
+    banners += `<div class="banner warn"><b>Pain still flagged:</b> ${escHtml(painStatus)} — from your most recent entry. This stays up (and gets sent with every plan request) until you log a new entry with Pain = None.</div>`;
+  }
   if (dueCount >= 24) {
     banners += `<div class="banner info"><b>Weak-point check-in due.</b> You've logged ${dueCount} climbing sessions since your last one.
       <div style="margin-top:8px;"><button class="btn btn-secondary" onclick="openQuestionnaire()">Take the check-in (2 min)</button></div></div>`;
@@ -293,6 +342,9 @@ function renderToday(){
     <div class="field"><label>How you're feeling</label>
       ${pillsHTML(FEELING_SCALE.map(f=>f.l), FEELING_SCALE.find(f=>f.v===d.feeling).l, 'setAskFeeling')}
     </div>
+    <div class="field"><label>Where</label>
+      ${pillsHTML(['Indoor','Outdoor'], d.location, 'setAskLocation', {sm:true})}
+    </div>
     <div class="field"><label>Session type(s) wanted</label>
       ${pillsHTML(SESSION_TYPE_OPTIONS, d.sessionTypes, 'toggleAskType')}
     </div>
@@ -303,6 +355,9 @@ function renderToday(){
       ${d.focusMode==='weak' && weakOptionLabel ? `<p class="small muted" style="margin-top:6px;">${escHtml(weakOptionLabel)}</p>` : ''}
       ${d.focusMode==='pick' ? `<div style="margin-top:8px;">${pillsHTML(FOCUS_AREAS, d.focusPick, 'setFocusPick', {sm:true})}</div>` : ''}
       ${d.focusMode==='other' ? `<textarea style="margin-top:8px;" placeholder="e.g. I struggle with laying back then getting my leg high and rocking over..." oninput="App.ui.askDraft.focusOther=this.value">${escHtml(d.focusOther)}</textarea>` : ''}
+    </div>
+    <div class="field"><label>Secondary focus (optional)</label>
+      ${pillsHTML(FOCUS_AREAS, d.focusSecondary, 'setFocusSecondary', {sm:true})}
     </div>
     <button class="btn btn-primary" onclick="askClaude()" ${App.ui.planLoading?'disabled':''}>${App.ui.planLoading ? 'Thinking…' : "Get today's plan"}</button>
     ${App.ui.planError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.planError)}</p>` : ''}
@@ -330,13 +385,16 @@ function renderLog(){
     <div class="field"><label>Feeling</label>${pillsHTML(FEELING_SCALE.map(f=>f.l), FEELING_SCALE.find(f=>f.v===d.feeling).l, 'setLogFeeling')}</div>
     ${isClimbing ? `
     <div class="field"><label>Intensity</label>${pillsHTML(INTENSITY_OPTIONS, d.intensity, 'setLogIntensity', {sm:true})}</div>
+    <div class="field"><label>Day type</label>${pillsHTML(DAY_TYPES, d.dayTypes, 'toggleLogDayType', {sm:true})}</div>
     <div class="field"><label>Climbs done</label>
-      <div class="row3">
+      <div class="small muted" style="margin-bottom:6px;">Location for climbs you add below:</div>
+      ${pillsHTML(['Indoor','Outdoor'], App.ui.climbLocationDraft, 'setClimbLocation', {sm:true})}
+      <div class="row3" style="margin-top:8px;">
         <input type="text" id="climbGrade" placeholder="grade e.g. 5.10c or V4">
         <input type="number" id="climbCount" placeholder="count" min="1" value="1">
         <button class="btn btn-ghost" style="padding:10px 14px;" onclick="addClimbRow()">+ add</button>
       </div>
-      <div class="chip-list">${App.ui.climbsDraft.map((c,i)=>`<span class="pill sm active">${escHtml(c.grade)} &times;${escHtml(c.count)}
+      <div class="chip-list">${App.ui.climbsDraft.map((c,i)=>`<span class="pill sm active">${escHtml(c.grade)} &times;${escHtml(c.count)} <span class="small">(${c.location})</span>
         <span onclick="removeClimbRow(${i})" style="cursor:pointer;margin-left:4px;">✕</span></span>`).join('')}</div>
     </div>
     <div class="field"><label>Focus areas worked</label>${pillsHTML(FOCUS_AREAS, d.focus, 'toggleLogFocus', {sm:true})}</div>
@@ -350,8 +408,9 @@ function renderLog(){
       <div class="field"><label>Core</label><input type="number" min="0" value="${d.timeCore}" oninput="App.ui.logDraft.timeCore=this.value"></div>
       <div class="field"><label>Mobility</label><input type="number" min="0" value="${d.timeMobility}" oninput="App.ui.logDraft.timeMobility=this.value"></div>
     </div>
-    <div class="field"><label>Failure points noticed</label>
-      <textarea placeholder="Where things broke down, if anywhere..." oninput="App.ui.logDraft.failurePoints=this.value">${escHtml(d.failurePoints)}</textarea>
+    <div class="field"><label>What broke down</label>
+      ${pillsHTML(FAILURE_POINT_OPTIONS, d.failurePoints, 'toggleLogFailurePoint', {sm:true})}
+      <textarea style="margin-top:8px;" placeholder="Any detail worth adding..." oninput="App.ui.logDraft.failurePointsOther=this.value">${escHtml(d.failurePointsOther)}</textarea>
     </div>
     ` : ''}
     <div class="field"><label>Pain or discomfort</label>${pillsHTML(PAIN_OPTIONS, d.pain, 'setLogPain', {sm:true})}</div>
@@ -397,6 +456,14 @@ function renderHistory(){
     <div class="bar-track"><div class="bar-fill" style="width:${counts[a]/maxCount*100}%"></div></div>
     <div class="bar-val">${counts[a]}</div></div>`).join('');
 
+  // day type frequency
+  const dtCounts = {}; DAY_TYPES.forEach(a=>dtCounts[a]=0);
+  entries.forEach(e => (e.dayTypes||[]).forEach(a=>{dtCounts[a]=(dtCounts[a]||0)+1;}));
+  const maxDt = Math.max(1, ...Object.values(dtCounts));
+  const dtBars = DAY_TYPES.map(a => `<div class="bar-row"><div class="bar-label">${a}</div>
+    <div class="bar-track"><div class="bar-fill" style="width:${dtCounts[a]/maxDt*100}%"></div></div>
+    <div class="bar-val">${dtCounts[a]}</div></div>`).join('');
+
   const entryRows = entries.map(e => `
     <div class="entry">
       <button class="entry-head" onclick="toggleEntry('${e.id}')">
@@ -405,11 +472,13 @@ function renderHistory(){
       </button>
       ${App.ui.expandedEntry===e.id ? `<div class="entry-body">
         ${e.intensity?`<p><b>Intensity:</b> ${e.intensity}</p>`:''}
-        ${(e.climbs&&e.climbs.length)?`<p><b>Climbs:</b> ${e.climbs.map(c=>c.grade+' ×'+c.count).join(', ')}</p>`:''}
+        ${(e.dayTypes&&e.dayTypes.length)?`<p><b>Day type:</b> ${e.dayTypes.join(', ')}</p>`:''}
+        ${(e.climbs&&e.climbs.length)?`<p><b>Climbs:</b> ${e.climbs.map(c=>c.grade+' ×'+c.count+(c.location?' ('+c.location+')':'')).join(', ')}</p>`:''}
         ${(e.focus&&e.focus.length)?`<p><b>Focus:</b> ${e.focus.join(', ')}</p>`:''}
         ${(e.wallAngle&&e.wallAngle.length)?`<p><b>Wall angle:</b> ${e.wallAngle.join(', ')}</p>`:''}
         ${(e.holdTypes&&e.holdTypes.length)?`<p><b>Holds:</b> ${e.holdTypes.join(', ')}</p>`:''}
-        ${e.failurePoints?`<p><b>Failure points:</b> ${escHtml(e.failurePoints)}</p>`:''}
+        ${(e.failurePoints&&e.failurePoints.length)?`<p><b>Broke down on:</b> ${e.failurePoints.join(', ')}</p>`:''}
+        ${e.failurePointsOther?`<p><b>Detail:</b> ${escHtml(e.failurePointsOther)}</p>`:''}
         ${e.pain&&e.pain!=='None'?`<p style="color:var(--red)"><b>Pain:</b> ${e.pain}</p>`:''}
         ${e.notes?`<p><b>Notes:</b> ${escHtml(e.notes)}</p>`:''}
       </div>` : ''}
@@ -417,7 +486,7 @@ function renderHistory(){
 
   const assessRows = App.assessments.slice().reverse().map(a => {
     const ranked = Object.entries(a.scores).sort((x,y)=>x[1]-y[1]);
-    return `<div class="entry"><div class="entry-body"><p><b>${a.date}</b> &middot; grade at the time: ${a.grade||'—'}</p>
+    return `<div class="entry"><div class="entry-body"><p><b>${a.date}</b> &middot; indoor: ${a.gradeIndoor||'—'} &middot; outdoor: ${a.gradeOutdoor||'—'}</p>
       <p class="small muted">Weakest: ${ranked[0][0]} (${ranked[0][1].toFixed(1)}) &middot; Strongest: ${ranked[2][0]} (${ranked[2][1].toFixed(1)})</p></div></div>`;
   }).join('') || '<p class="small muted">No check-ins taken yet.</p>';
 
@@ -432,6 +501,7 @@ function renderHistory(){
   <div class="card"><h2>Last 12 weeks</h2><div class="heatgrid">${heat}</div></div>
   <div class="card"><h2>Minutes, last 14 entries</h2><div class="barlist">${minBars}</div></div>
   <div class="card"><h2>Focus area attention</h2><div class="barlist">${focusBars}</div></div>
+  <div class="card"><h2>Day types, over time</h2><div class="barlist">${dtBars}</div></div>
   <div class="card"><h2>Weak-point check-ins</h2>${assessRows}</div>
   <div class="card"><h2>Entries</h2>${entryRows}</div>`;
 }
@@ -447,10 +517,34 @@ function renderSettings(){
     <div class="field"><label>Cycle start date</label>
       <input type="date" value="${s.cycleStartDate}" oninput="App.settings.cycleStartDate=this.value">
     </div>
-    <div class="field"><label>Current grade</label>
-      <input type="text" placeholder="e.g. 5.10c" value="${escHtml(s.grade)}" oninput="App.settings.grade=this.value">
+    <div class="row2">
+      <div class="field"><label>Indoor grade</label>
+        <input type="text" placeholder="e.g. 5.10c" value="${escHtml(s.gradeIndoor)}" oninput="App.settings.gradeIndoor=this.value">
+      </div>
+      <div class="field"><label>Outdoor grade</label>
+        <input type="text" placeholder="e.g. 5.10a" value="${escHtml(s.gradeOutdoor)}" oninput="App.settings.gradeOutdoor=this.value">
+      </div>
     </div>
     <button class="btn btn-secondary" onclick="openQuestionnaire()">Take weak-point check-in now</button>
+  </div>
+  <div class="card">
+    <h2>Jump to a phase/week</h2>
+    <p class="small muted">For an unplanned taper/project week, a missed week, or jumping partway into any phase — this resets the cycle math so today lands exactly where you say.</p>
+    <div class="row2">
+      <div class="field"><label>Phase</label>
+        <select id="overridePhase">${getCyclePhases(s.cycleType).map(p=>`<option value="${escAttr(p.name)}">${p.name} (${p.weeks}wk)</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Week of that phase</label>
+        <input type="number" id="overrideWeek" min="1" max="4" value="1">
+      </div>
+    </div>
+    <button class="btn btn-ghost" onclick="applyPhaseOverride()">Set as current</button>
+  </div>
+  <div class="card">
+    <h2>Export / import your data</h2>
+    <p class="small muted">Export downloads a JSON file of your entries and check-ins (API key excluded). Import reads one back in and merges it with what's already here — nothing gets overwritten, so it's safe to import an old backup after switching phones.</p>
+    <button class="btn btn-ghost" onclick="exportData()">Export data (.json)</button>
+    <input type="file" id="importFile" accept="application/json" style="margin-top:8px;" onchange="importData(this.files[0])">
   </div>
   <div class="card">
     <h2>Anthropic API key</h2>
@@ -482,6 +576,7 @@ function renderQuestionnaire(){
 
 // ---- Event handlers (called from inline onclick in templates) ----
 function setAskFeeling(label){ App.ui.askDraft.feeling = FEELING_SCALE.find(f=>f.l===label).v; App.render(); }
+function setAskLocation(loc){ App.ui.askDraft.location = loc; App.render(); }
 function toggleAskType(t){ const arr = App.ui.askDraft.sessionTypes; const i = arr.indexOf(t);
   if (i>-1) arr.splice(i,1); else arr.push(t); App.render(); }
 function setFocusMode(label){
@@ -489,6 +584,10 @@ function setFocusMode(label){
   App.render();
 }
 function setFocusPick(area){ App.ui.askDraft.focusPick = area; App.render(); }
+function setFocusSecondary(area){
+  App.ui.askDraft.focusSecondary = App.ui.askDraft.focusSecondary === area ? '' : area;
+  App.render();
+}
 
 function setLogFeeling(label){ App.ui.logDraft.feeling = FEELING_SCALE.find(f=>f.l===label).v; App.render(); }
 function setLogIntensity(v){ App.ui.logDraft.intensity = v; App.render(); }
@@ -496,16 +595,55 @@ function setLogPain(v){ App.ui.logDraft.pain = v; App.render(); }
 function toggleLogFocus(a){ toggleArr(App.ui.logDraft.focus, a); App.render(); }
 function toggleLogWall(a){ toggleArr(App.ui.logDraft.wallAngle, a); App.render(); }
 function toggleLogHold(a){ toggleArr(App.ui.logDraft.holdTypes, a); App.render(); }
+function toggleLogDayType(a){ toggleArr(App.ui.logDraft.dayTypes, a); App.render(); }
+function toggleLogFailurePoint(a){ toggleArr(App.ui.logDraft.failurePoints, a); App.render(); }
+function setClimbLocation(loc){ App.ui.climbLocationDraft = loc; App.render(); }
 function toggleArr(arr, v){ const i=arr.indexOf(v); if (i>-1) arr.splice(i,1); else arr.push(v); }
 
 function addClimbRow(){
   const g = document.getElementById('climbGrade').value.trim();
   const c = Number(document.getElementById('climbCount').value) || 1;
   if (!g) return;
-  App.ui.climbsDraft.push({grade:g, count:c});
+  App.ui.climbsDraft.push({grade:g, count:c, location: App.ui.climbLocationDraft || 'Indoor'});
   App.render();
 }
 function removeClimbRow(i){ App.ui.climbsDraft.splice(i,1); App.render(); }
+
+function exportData(){
+  const safeSettings = Object.assign({}, App.settings);
+  delete safeSettings.apiKey;
+  const payload = { exportedAt: new Date().toISOString(), settings: safeSettings, entries: App.entries, assessments: App.assessments };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'beta-log-export-' + todayISO() + '.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  App.toast('Exported — check your downloads');
+}
+
+function importData(file){
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      const existingEntryIds = new Set(App.entries.map(e=>e.id));
+      const newEntries = (data.entries||[]).filter(e => !existingEntryIds.has(e.id));
+      App.entries = App.entries.concat(newEntries).sort((a,b)=> a.date.localeCompare(b.date));
+      const existingAssessIds = new Set(App.assessments.map(a=>a.id));
+      const newAssessments = (data.assessments||[]).filter(a => !existingAssessIds.has(a.id));
+      App.assessments = App.assessments.concat(newAssessments).sort((a,b)=> a.date.localeCompare(b.date));
+      App.saveEntries(); App.saveAssessments();
+      App.toast(`Imported ${newEntries.length} entries, ${newAssessments.length} check-ins`);
+      App.render();
+    } catch(e) {
+      App.toast('Could not read that file');
+    }
+  };
+  reader.readAsText(file);
+}
+
 
 function submitLog(){
   const d = App.ui.logDraft;
@@ -515,6 +653,7 @@ function submitLog(){
   App.saveEntries();
   App.ui.logDraft = freshLogDraft();
   App.ui.climbsDraft = [];
+  App.ui.climbLocationDraft = 'Indoor';
   App.toast('Saved to your log');
   App.setTab('history');
 }
@@ -534,7 +673,7 @@ function submitAssessment(){
   QUESTIONS.forEach((q,i)=> totals[q.cat].push(answers[i]));
   const scores = {};
   Object.keys(totals).forEach(cat => { scores[cat] = totals[cat].reduce((a,b)=>a+b,0) / totals[cat].length; });
-  App.assessments.push({ id: uid(), date: todayISO(), grade: App.settings.grade, answers, scores });
+  App.assessments.push({ id: uid(), date: todayISO(), gradeIndoor: App.settings.gradeIndoor, gradeOutdoor: App.settings.gradeOutdoor, answers, scores });
   App.saveAssessments();
   App.ui.qOpen = false;
   App.toast('Check-in saved');
@@ -552,11 +691,14 @@ App.render();
 
 // Explicit global exposure (belt-and-suspenders for inline onclick handlers across environments)
 window.App = App;
-window.setAskFeeling = setAskFeeling; window.toggleAskType = toggleAskType;
-window.setFocusMode = setFocusMode; window.setFocusPick = setFocusPick;
+window.setAskFeeling = setAskFeeling; window.toggleAskType = toggleAskType; window.setAskLocation = setAskLocation;
+window.setFocusMode = setFocusMode; window.setFocusPick = setFocusPick; window.setFocusSecondary = setFocusSecondary;
 window.setLogFeeling = setLogFeeling; window.setLogIntensity = setLogIntensity; window.setLogPain = setLogPain;
 window.toggleLogFocus = toggleLogFocus; window.toggleLogWall = toggleLogWall; window.toggleLogHold = toggleLogHold;
+window.toggleLogDayType = toggleLogDayType; window.toggleLogFailurePoint = toggleLogFailurePoint;
+window.setClimbLocation = setClimbLocation;
 window.addClimbRow = addClimbRow; window.removeClimbRow = removeClimbRow; window.submitLog = submitLog;
 window.toggleEntry = toggleEntry; window.setCycleType = setCycleType; window.saveSettingsForm = saveSettingsForm;
 window.openQuestionnaire = openQuestionnaire; window.closeQuestionnaire = closeQuestionnaire;
 window.setQAnswer = setQAnswer; window.submitAssessment = submitAssessment; window.askClaude = askClaude;
+window.applyPhaseOverride = applyPhaseOverride; window.exportData = exportData; window.importData = importData;
