@@ -202,7 +202,14 @@ const App = {
   setTab(tab) { this.ui.tab = tab; this.render(); },
 };
 
-function todayISO(){ return new Date().toISOString().slice(0,10); }
+// UTC-based date strings are the wrong tool here: toISOString() converts to UTC first, so anyone
+// west of Greenwich using the app in the evening gets tomorrow's date. Always build date strings
+// from local getters instead.
+function toLocalISO(d){
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function todayISO(){ return toLocalISO(new Date()); }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function freshLogDraft(){
   return { date: todayISO(), type:'Climbing', duration:60, feeling:3, intensity:'Moderate',
@@ -213,8 +220,9 @@ function freshLogDraft(){
 }
 function freshAskDraft(){
   return { minutes:60, feeling:3, location:'Indoor', sessionTypes:['Climbing'], focusMode:'weak', focusPick:'', focusOther:'', focusSecondary:'',
-    sessionStyle:'play', drillCategory:'' };
+    sessionStyle:'play', drillCategory:'', mobilityFocus:[] };
 }
+const MOBILITY_FOCUS_OPTIONS = ['Hips','Shoulders','Thoracic spine/back','Ankles/feet','Wrists','Full body'];
 
 // ---- Cycle phase calculation ----
 function getCyclePhases(cycleType){
@@ -257,7 +265,7 @@ function setPhaseManually(phaseName, weekOfPhase){
   const daysBack = weekInCycle * 7;
   const newStart = new Date(todayISO() + 'T00:00:00');
   newStart.setDate(newStart.getDate() - daysBack);
-  App.settings.cycleStartDate = newStart.toISOString().slice(0,10);
+  App.settings.cycleStartDate = toLocalISO(newStart);
   App.saveSettings();
   App.toast('Set to ' + phaseName + ', week ' + weekOfPhase);
   App.setTab('today');
@@ -315,7 +323,7 @@ function getWeekDates(anchorISO){
   const dow = (anchor.getDay() + 6) % 7; // 0=Mon .. 6=Sun
   const monday = new Date(anchor); monday.setDate(anchor.getDate() - dow);
   const out = [];
-  for (let i=0;i<7;i++){ const d = new Date(monday); d.setDate(monday.getDate()+i); out.push(d.toISOString().slice(0,10)); }
+  for (let i=0;i<7;i++){ const d = new Date(monday); d.setDate(monday.getDate()+i); out.push(toLocalISO(d)); }
   return out;
 }
 function compareToWeeklyTemplate(entries){
@@ -502,6 +510,22 @@ function clearPainFlag(){
 }
 
 // ---- Plan export / save-to-log (so a generated plan is never just stuck in memory) ----
+// Web Share API opens the native share sheet on iOS/Android (Notes is a normal share target there);
+// where that's not supported (most desktop browsers), fall back to copying to the clipboard.
+async function sharePlan(){
+  if (!App.ui.planText) return;
+  const text = `Beta Log — ${todayISO()}\n\n${App.ui.planText}`;
+  if (navigator.share) {
+    try { await navigator.share({ title: 'Beta Log plan', text }); return; }
+    catch (e) { if (e && e.name === 'AbortError') return; /* user cancelled the share sheet */ }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    App.toast('Copied — paste into Notes or anywhere else');
+  } catch (e) {
+    App.toast('Could not copy automatically — select and copy the plan text manually');
+  }
+}
 function openPlanAsPage(){
   if (!App.ui.planText) return;
   const body = linkifyPlanToHTML(App.ui.planText);
@@ -561,20 +585,27 @@ function savePlanAsImage(){
 const COLORS_JS = { bg:'#17161B', gold:'#CC9B3C', text:'#EEE9E1' };
 function setPlanAdherence(v){ App.ui.planAdherencePick = v; App.render(); }
 function savePlanToLog(){
-  const today = todayISO();
-  const todaysEntries = App.entries.filter(e => e.date === today);
-  if (todaysEntries.length > 0) {
-    const target = todaysEntries[todaysEntries.length - 1];
-    target.plan = App.ui.planText; target.planAdherence = App.ui.planAdherencePick;
+  const d = App.ui.askDraft;
+  const type = d.sessionTypes.includes('Climbing') ? 'Climbing' : (d.sessionTypes[0] || 'Strength');
+  const duration = Number(d.minutes) || 60;
+  const entry = Object.assign(freshLogDraft(), {
+    id: uid(), date: todayISO(), type, duration, feeling: d.feeling,
+    plan: App.ui.planText, planAdherence: App.ui.planAdherencePick,
+    notes: 'Logged from a generated plan.',
+  });
+  if (type !== 'Climbing') {
+    // Same defensive zeroing as submitLog() — a non-climbing entry shouldn't carry freshLogDraft()'s
+    // climbing-field defaults (that's the bug that made mobility sessions log zero mobility time).
+    entry.timeClimb = 0; entry.intensity = ''; entry.dayTypes = []; entry.focus = [];
+    entry.wallAngle = []; entry.holdTypes = []; entry.failurePoints = []; entry.failurePointsOther = ''; entry.climbs = [];
   } else {
-    const d = App.ui.askDraft;
-    App.entries.push(Object.assign(freshLogDraft(), {
-      id: uid(), date: today, type: d.sessionTypes.includes('Climbing') ? 'Climbing' : (d.sessionTypes[0] || 'Strength'),
-      duration: Number(d.minutes) || 60, feeling: d.feeling,
-      plan: App.ui.planText, planAdherence: App.ui.planAdherencePick,
-      notes: 'Logged from a generated plan.',
-    }));
+    entry.timeClimb = duration;
   }
+  const bucket = TYPE_TO_TIME_FIELD[type];
+  if (bucket) entry[bucket] = duration;
+  if (TYPE_TO_WORKOUT_STYLE[type]) entry.workoutStyles = [TYPE_TO_WORKOUT_STYLE[type]];
+  // Always a new entry — never merge into whatever else happens to be logged today already.
+  App.entries.push(entry);
   App.entries.sort((a,b)=> a.date.localeCompare(b.date));
   App.saveEntries();
   App.ui.showAdherence = false; App.ui.planAdherencePick = '';
@@ -653,15 +684,18 @@ async function askClaude(feedback){
       "patterns, their own weekly strength-training guidelines, and today's context. Give a single, specific, " +
       "concrete plan for today's session, sized to the exact time budget given. Use short list format with rough " +
       "durations/sets/reps, no fluff, no disclaimers. Follow the phase guideline loosely, not rigidly.\n\n" +
-      "STRUCTURE REQUIREMENT for any day that includes climbing: always include, in this order — (1) warmup, " +
-      "(2) climbing volume, (3) some near-limit/limit climbing, (4) climbing-related strength or power exercise, " +
-      "(5) cooldown/stabilizer work. Never drop a piece, but vary the AMOUNT of each — how much climbing, how much " +
+      "STRUCTURE REQUIREMENT for any day that includes climbing: always include, in this order — (1) warmup off " +
+      "the wall — general movement prep to get the body ready (joint circles, activation drills, light dynamic " +
+      "stretching — not on-wall climbing), (2) light easy climbing as a second warmup phase, (3) the main climbing " +
+      "volume, (4) some near-limit/limit climbing, (5) climbing-related strength or power exercise, " +
+      "(6) cooldown/stabilizer work. Never drop a piece, but vary the AMOUNT of each — how much climbing, how much " +
       "antagonist/stabilizer, how much cardio — based on the phase, time budget, and the patterns/weekly-rhythm notes " +
       "below. Design climbing portions around 4-8 move problems or route laps with real rest between attempts — never " +
       "a single move drilled to exhaustion, and never just 20 minutes projecting one hard climb. On non-climbing days, " +
-      "build a real mobility/general-movement session, not just a stretch list — and if it fits the time budget, " +
-      "consider drawing from their own workout templates (core circuit, leg day, upper tabata, TRX, or the full " +
-      "efficient-workout structure) rather than inventing something generic.\n\n" +
+      "build a real mobility/general-movement session, not just a stretch list — center it on the mobility focus " +
+      "area if one is given — and if it fits the time budget, consider drawing from their own workout templates " +
+      "(core circuit, leg day, upper tabata, TRX, or the full efficient-workout structure) rather than inventing " +
+      "something generic.\n\n" +
       "If a pattern flag or weekly-rhythm note is relevant, address it directly in the plan (e.g. slot in finger work " +
       "or antagonist work if it's been skipped, or flag that a rest day is overdue) and say briefly why — but weigh " +
       "this against their bandwidth constraints; a missed guideline on a genuinely busy week is not an emergency. The " +
@@ -680,7 +714,8 @@ async function askClaude(feedback){
       `Detected patterns: ${flags.length ? flags.join(' | ') : 'none flagged'}\n\n` +
       `Recent log, one line per calendar day (most recent last):\n${recent}\n\n` +
       `Today:\n- Minutes available: ${d.minutes}\n- Feeling: ${FEELING_SCALE.find(f=>f.v===d.feeling).l} (${d.feeling}/5)\n` +
-      `- Location: ${d.location}\n- Session type(s) wanted: ${d.sessionTypes.join(', ') || 'no preference'}\n- Priority focus: ${focusLine}\n\n` +
+      `- Location: ${d.location}\n- Session type(s) wanted: ${d.sessionTypes.join(', ') || 'no preference'}\n- Priority focus: ${focusLine}\n` +
+      (d.mobilityFocus.length ? `- Mobility focus: ${d.mobilityFocus.join(', ')}\n` : '') + `\n` +
       `Give today's plan.`;
 
     messages = [{ role:'user', content: userMsg }];
@@ -820,6 +855,10 @@ function renderToday(){
     <div class="field"><label>Session type(s) wanted</label>
       ${pillsHTML(SESSION_TYPE_OPTIONS, d.sessionTypes, 'toggleAskType')}
     </div>
+    ${d.sessionTypes.includes('Mobility / Stretch') ? `
+    <div class="field"><label>Mobility focus (optional)</label>
+      ${pillsHTML(MOBILITY_FOCUS_OPTIONS, d.mobilityFocus, 'toggleMobilityFocus', {sm:true})}
+    </div>` : ''}
     ${d.sessionTypes.includes('Climbing') ? `
     <div class="field"><label>Climbing portion</label>
       ${pillsHTML(['Just play/climb', 'Give me a drill'], d.sessionStyle==='drill' ? 'Give me a drill' : 'Just play/climb', 'setSessionStyle', {sm:true})}
@@ -844,10 +883,12 @@ function renderToday(){
     ${App.ui.planText ? `<div class="plan-box">${renderPlanWithSearchLinks(App.ui.planText)}</div>
     <p class="small muted" style="margin-top:6px;">Tap any exercise name to search it.</p>
     <div class="pillrow" style="margin-top:10px;">
+      <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="sharePlan()">Share / copy text</button>
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="openPlanAsPage()">Open as page (tap-to-search)</button>
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="savePlanAsImage()">Save as image</button>
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="App.ui.showAdherence = !App.ui.showAdherence; App.render();">Add this to today's log</button>
     </div>
+    <p class="small muted" style="margin-top:6px;">"Share / copy text" is the fastest way into Notes, Messages, email, anywhere — on iPhone it opens the share sheet; elsewhere it copies to your clipboard.</p>
     <p class="small muted" style="margin-top:6px;">Heads up: the image export is a flat picture — links only work in "Open as page."</p>
     ${App.ui.showAdherence ? `<div class="field" style="margin-top:10px;">
       <label>If you already did it (or partly did it) — how close did you end up sticking to this?</label>
@@ -952,7 +993,7 @@ function renderHistory(){
   const map = {}; days.forEach(d => { map[d.date] = d; });
   const cal = [];
   const today = new Date(todayISO()+'T00:00:00');
-  for (let i=83;i>=0;i--){ const dd=new Date(today); dd.setDate(dd.getDate()-i); const iso=dd.toISOString().slice(0,10); cal.push({date:iso, d:map[iso]||null}); }
+  for (let i=83;i>=0;i--){ const dd=new Date(today); dd.setDate(dd.getDate()-i); const iso=toLocalISO(dd); cal.push({date:iso, d:map[iso]||null}); }
   const weeks = []; for (let i=0;i<cal.length;i+=7) weeks.push(cal.slice(i,i+7));
   const maxDur = Math.max(1, ...days.map(d=>d.totalMinutes));
   const heat = weeks.map(w => `<div class="heatcol">${w.map(cell=>{
@@ -1135,6 +1176,7 @@ function setAskFeeling(v){ App.ui.askDraft.feeling = Number(v); App.render(); }
 function setAskLocation(loc){ App.ui.askDraft.location = loc; App.render(); }
 function toggleAskType(t){ const arr = App.ui.askDraft.sessionTypes; const i = arr.indexOf(t);
   if (i>-1) arr.splice(i,1); else arr.push(t); App.render(); }
+function toggleMobilityFocus(a){ toggleArr(App.ui.askDraft.mobilityFocus, a); App.render(); }
 function setFocusMode(label){
   App.ui.askDraft.focusMode = label.indexOf('weak')>-1 ? 'weak' : label.indexOf('Pick')>-1 ? 'pick' : 'other';
   App.render();
@@ -1258,12 +1300,14 @@ function submitLog(){
   if (bucket && !entry[bucket]) entry[bucket] = Number(entry.duration) || 0;
 
   if (App.ui.editingId) {
-    // Editing an existing entry (e.g. fixing a mis-entered date) — replace by id, no date/type dedupe.
+    // Editing an existing entry (e.g. fixing a mis-entered date) — replace by id.
     App.entries = App.entries.map(e => e.id === App.ui.editingId ? entry : e).sort((a,b)=> a.date.localeCompare(b.date));
     App.toast('Entry updated');
   } else {
-    App.entries = App.entries.filter(e => !(e.date===entry.date && e.type===entry.type)).concat([entry])
-      .sort((a,b)=> a.date.localeCompare(b.date));
+    // Always add as a new entry — never dedupe by date+type. A second mobility session on the
+    // same day is a real second session, not a correction of the first; day-aggregation already
+    // sums across every entry for a date correctly, so there's nothing to protect against here.
+    App.entries = App.entries.concat([entry]).sort((a,b)=> a.date.localeCompare(b.date));
     App.toast('Saved to your log');
   }
   App.saveEntries();
@@ -1326,3 +1370,4 @@ window.toggleLogWorkoutStyle = toggleLogWorkoutStyle; window.toggleLogExercise =
 window.deleteEntry = deleteEntry; window.openPlanAsPage = openPlanAsPage; window.savePlanAsImage = savePlanAsImage;
 window.savePlanToLog = savePlanToLog; window.searchExercise = searchExercise; window.setPlanAdherence = setPlanAdherence;
 window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
+window.sharePlan = sharePlan; window.toggleMobilityFocus = toggleMobilityFocus; window.toLocalISO = toLocalISO;
