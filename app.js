@@ -9,11 +9,17 @@ const WALL_ANGLES = ['Overhang','Vertical','Slab','Roof'];
 const HOLD_TYPES = ['Crimps','Slopers','Pockets','Pinches','Jugs'];
 const FEELING_SCALE = [{v:1,l:'Flat'},{v:2,l:'Off'},{v:3,l:'Steady'},{v:4,l:'Strong'},{v:5,l:'Dialed'}];
 const INTENSITY_OPTIONS = ['Easy','Moderate','Hard','Max effort'];
-const SESSION_TYPE_OPTIONS = ['Climbing','Antagonist / Stabilizer','Mobility / Stretch','Strength','Cardio','Core Workout','Leg Workout'];
+const SESSION_TYPE_OPTIONS = ['Climbing','Fingers','Antagonist / Stabilizer','Mobility / Stretch','Strength','Cardio','Core Workout'];
 const PAIN_OPTIONS = ['None','Mild, manageable','Recurring issue','Something new'];
 const ADHERENCE_OPTIONS = ['Followed exactly','Mostly followed','Modified a lot','Did something else entirely'];
 const DAY_TYPES = ['Indoor','Outdoor','Bouldering','Sport/Rope','Project','Power','Power-Endurance','Skills/Technique','Fun/Social'];
 const FAILURE_POINT_OPTIONS = ["Grip/forearms gave out","Footwork broke down","Lost the sequence","Couldn't commit to the move","Got pumped","Couldn't reach the hold","Feet cut loose","Mental — backed off"];
+// General tags for Strength/Antagonist (legs folded in here as a muscle group, not a separate type)
+// and Core, so logging doesn't require hunting through a long named-exercise list every time.
+const MUSCLE_GROUPS = ['Upper body push','Upper body pull','Legs','Grip/forearms','Full body'];
+const POWER_LEVELS = ['Max strength/heavy','Power/explosive','Endurance/high-rep','Stability/control'];
+const CORE_REGIONS = ['Upper abs','Lower abs','Obliques','Full core/anti-rotation'];
+const CORE_MOVEMENT_TYPES = ['Static/isometric','Dynamic/crunches-type'];
 
 // Reference week — used only as a comparison point, not enforced. Mon/Fri rest, Tue/Thu climb,
 // Wed exercise, Sat+Sun climb (one exercise-focused, one fun-focused).
@@ -21,35 +27,36 @@ const WEEKLY_TEMPLATE = ['Rest','Climb','Exercise','Climb','Rest','Climb','Climb
 const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
 // Rough weekly minute targets used only to scale the radar chart — adjustable, not gospel.
-const WEEKLY_TARGETS = { climb:150, fingers:40, strength:30, antag:50, core:40, mobility:40, cardio:40, legs:30 };
+// Axes match the loggable session types exactly (legs live inside Strength/Antagonist now).
+const WEEKLY_TARGETS = { climb:150, fingers:40, strength:40, antag:50, core:40, mobility:40, cardio:40 };
 const RADAR_AXES = [
   {key:'climb', label:'Climbing'}, {key:'fingers', label:'Fingers'}, {key:'strength', label:'Strength'},
-  {key:'antag', label:'Antagonist'}, {key:'core', label:'Core'}, {key:'legs', label:'Legs'}, {key:'mobility', label:'Mobility'}, {key:'cardio', label:'Cardio'},
+  {key:'antag', label:'Antagonist'}, {key:'core', label:'Core'}, {key:'mobility', label:'Mobility'}, {key:'cardio', label:'Cardio'},
 ];
 
 // Your own workout structures and exercise pool — used for logging (what did I do) and the
 // weekly-guidelines check-in. These are guidelines to notice drift on, not requirements to hit.
-const WORKOUT_STYLES = ['Core Circuit','Leg Day','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout','Stretch/Mobility','Cardio Circuit','General/Other'];
+const WORKOUT_STYLES = ['Core Circuit','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout','Stretch/Mobility','Cardio Circuit','Fingers','General/Other'];
 const EXERCISE_LIBRARY = {
   'Core Circuit': ["Hanging leg lift","Oblique weighted arm dip","Sit-up to stand-up","Wheelbarrow","Oblique knee raise plank","Farmer walk","A-frame drop","Plank (elevated)","Plank (sideways walk)","Side plank with leg raise","Full-body focus plank","Kettlebell figure 8","Matrix lean back"],
-  'Leg Day': ["Squat/deadlift","Catcher calf raises","Calf jumps","High stepping","Weighted box jumps","Bulgarian lunges","Hanging knee lifts","Wall sits","Multidirectional lunges","Core-to-toe side lunges"],
   'Upper Tabata': ["Bent-over rows","Lat pulldowns","Bicep curls","Wrist curls"],
   'TRX — Core': ["Body saw","Side plank with hip raise","Overhead squat"],
   'TRX — Shoulder': ["Clock press","T-Y-I deltoid series","Atomic pushups","T-spine rotation"],
   'Full Efficient Workout': ["Mountain mans (rope/pulley alternating lockouts)","Campus board lunges","Around-the-world pull-ups","Offset pull-ups","Box jumps","One-leg squats","Lunges with shoulder press","Step-ups onto box","Tucks","Bridges","Side elbow planks","Dip-bar leg raises","Superman pushups","Bicep/tricep work","Chest/upper work","Forearm plank","Dolphin pushups","One-arm planks","Toe touches","Scissor kicks"],
   'Stretch/Mobility': ["Joint circles (ankles/hips/shoulders)","World's greatest stretch","Pigeon pose","Cat-cow + thread-the-needle","Hip flexor stretch","Hamstring stretch","Adductor stretch","Rotator cuff stretch","Chest/biceps doorway stretch","Thoracic spine rotation","Wrist mobility circles","Shoulder dislocates (band/stick)","Pec release (lacrosse ball)","90/90 hip switches"],
   'Cardio Circuit': ["Jump rope","Rowing intervals","Stair sprints","Suicide sprints","Incline treadmill walk","Bike intervals","Burpees"],
-  'General/Other': ["Finger hangs","Finger pull-ups","Hanging leg raises","Pistol squats","Suicide sprints","Finger planks","Raised-leg diamond pushups","Jumping lunges","Lateral pull-ups","Upside-down shoulder press","Tricep dips","Incline pushups","Chair ups","Stair jumps","Stair sprints","Front squats","Turkish getup","Straight-arm planks","Shoulder dislocates"],
+  'Fingers': ["Finger hangs","Finger pull-ups","Finger planks","Hangboard repeaters","Minimum-edge hangs","Fingerboard moving hangs"],
+  'General/Other': ["Hanging leg raises","Pistol squats","Raised-leg diamond pushups","Jumping lunges","Lateral pull-ups","Upside-down shoulder press","Tricep dips","Incline pushups","Chair ups","Stair jumps","Stair sprints","Front squats","Turkish getup","Straight-arm planks","Shoulder dislocates"],
 };
 // Which workout styles are worth surfacing for each session type — so picking "Cardio" doesn't
-// show you TRX options and picking "Core Workout" doesn't show you Upper Tabata.
+// show you TRX options and picking "Fingers" doesn't show you Cardio Circuit.
 const TYPE_RELEVANT_STYLES = {
   'Antagonist / Stabilizer': ['TRX — Shoulder','Upper Tabata','General/Other'],
   'Strength': ['Upper Tabata','Full Efficient Workout','General/Other'],
   'Cardio': ['Cardio Circuit','General/Other'],
   'Core Workout': ['Core Circuit','TRX — Core','Full Efficient Workout'],
-  'Leg Workout': ['Leg Day','Full Efficient Workout'],
   'Mobility / Stretch': ['Stretch/Mobility'],
+  'Fingers': ['Fingers'],
 };
 
 // Titles only, from your two physical books — enough to point you at the right page, not a
@@ -212,14 +219,14 @@ function toLocalISO(d){
 function todayISO(){ return toLocalISO(new Date()); }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function freshLogDraft(){
-  return { date: todayISO(), type:'Climbing', duration:60, feeling:3, intensity:'Moderate',
+  return { date: todayISO(), type:'Climbing', duration:0, feeling:3, intensity:'Moderate',
     dayTypes:[], dayTypesOther:'', focus:[], wallAngle:[], holdTypes:[],
-    timeClimb:45, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeLegs:0, timeMobility:0, timeCardio:0,
-    workoutStyles:[], exercisesDone:[],
+    timeClimb:0, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeMobility:0, timeCardio:0,
+    workoutStyles:[], exercisesDone:[], muscleGroup:[], powerLevel:'', coreRegion:[], coreMovementType:[],
     failurePoints:[], failurePointsOther:'', pain:'None', notes:'', plan:'', planAdherence:'' };
 }
 function freshAskDraft(){
-  return { minutes:60, feeling:3, location:'Indoor', sessionTypes:['Climbing'], focusMode:'weak', focusPick:'', focusOther:'', focusSecondary:'',
+  return { minutes:60, feeling:3, sessionTypes:['Climbing'], focusMode:'weak', focusPick:'', focusOther:'', focusSecondary:'',
     sessionStyle:'play', drillCategory:'', mobilityFocus:[] };
 }
 const MOBILITY_FOCUS_OPTIONS = ['Hips','Shoulders','Thoracic spine/back','Ankles/feet','Wrists','Full body'];
@@ -283,7 +290,7 @@ function aggregateByDay(entries){
   const byDate = {};
   entries.forEach(e => {
     const d = byDate[e.date] || {
-      date: e.date, totalMinutes: 0, timeClimb:0, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeLegs:0, timeMobility:0, timeCardio:0,
+      date: e.date, totalMinutes: 0, timeClimb:0, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeMobility:0, timeCardio:0,
       types: [], dayTypes: [], focus: [], intensities: [], pain: 'None', entries: [],
     };
     d.totalMinutes += Number(e.duration) || 0;
@@ -292,7 +299,6 @@ function aggregateByDay(entries){
     d.timeStrength += Number(e.timeStrength) || 0;
     d.timeAntag += Number(e.timeAntag) || 0;
     d.timeCore += Number(e.timeCore) || 0;
-    d.timeLegs += Number(e.timeLegs) || 0;
     d.timeMobility += Number(e.timeMobility) || 0;
     d.timeCardio += Number(e.timeCardio) || 0;
     if (!d.types.includes(e.type)) d.types.push(e.type);
@@ -362,17 +368,20 @@ function computeWeeklyRadarData(entries){
 // pass/fail — the point is noticing drift, not adding pressure on top of an already full plate.
 function computeWeeklyGuidelines(entries){
   const days = dayList(entries).filter(d => { const ago = Math.round((new Date(todayISO())-new Date(d.date))/86400000); return ago>=0 && ago<7; });
-  const coreDayCount = days.filter(d => d.timeCore > 0 || d.entries.some(e => (e.exercisesDone||[]).some(x => (EXERCISE_LIBRARY['Core Circuit']||[]).includes(x)))).length;
-  const coreExercises = new Set(); days.forEach(d => d.entries.forEach(e => (e.exercisesDone||[]).forEach(x => { if ((EXERCISE_LIBRARY['Core Circuit']||[]).includes(x)) coreExercises.add(x); })));
-  const legDayCount = days.filter(d => d.entries.some(e => (e.exercisesDone||[]).some(x => (EXERCISE_LIBRARY['Leg Day']||[]).includes(x)))).length;
-  const legExercises = new Set(); days.forEach(d => d.entries.forEach(e => (e.exercisesDone||[]).forEach(x => { if ((EXERCISE_LIBRARY['Leg Day']||[]).includes(x)) legExercises.add(x); })));
+  const coreDayCount = days.filter(d => d.timeCore > 0).length;
+  const coreVariety = new Set();
+  days.forEach(d => d.entries.forEach(e => {
+    (e.exercisesDone||[]).forEach(x => { if ((EXERCISE_LIBRARY['Core Circuit']||[]).includes(x)) coreVariety.add(x); });
+    (e.coreRegion||[]).forEach(r => coreVariety.add(r));
+  }));
+  const legDayCount = days.filter(d => d.entries.some(e => (e.muscleGroup||[]).includes('Legs'))).length;
   const tabataDone = days.some(d => d.entries.some(e => (e.workoutStyles||[]).includes('Upper Tabata')));
   const trxDone = days.some(d => d.entries.some(e => (e.workoutStyles||[]).includes('TRX — Core') || (e.workoutStyles||[]).includes('TRX — Shoulder')));
   const fullWorkoutCount = days.filter(d => d.entries.some(e => (e.workoutStyles||[]).includes('Full Efficient Workout'))).length;
 
   return [
-    { label: 'Core (5+ exercises, 3-5x/wk)', ok: coreExercises.size >= 5 && coreDayCount >= 3, detail: `${coreExercises.size} distinct exercises, ${coreDayCount} day(s) this week` },
-    { label: 'Legs (2-3 exercises, 1-2x/wk)', ok: legExercises.size >= 2 && legDayCount >= 1, detail: `${legExercises.size} distinct exercises, ${legDayCount} day(s) this week` },
+    { label: 'Core variety, 3-5x/wk', ok: coreVariety.size >= 3 && coreDayCount >= 3, detail: `${coreVariety.size} distinct region(s)/exercise(s), ${coreDayCount} day(s) this week` },
+    { label: 'Legs (1-2x/wk)', ok: legDayCount >= 1, detail: `${legDayCount} day(s) this week tagged Legs` },
     { label: 'Upper Tabata (1x/wk)', ok: tabataDone, detail: tabataDone ? 'done this week' : 'not yet this week' },
     { label: 'TRX (1x/wk)', ok: trxDone, detail: trxDone ? 'done this week' : 'not yet this week' },
     { label: 'Full efficient workout (2x/wk)', ok: fullWorkoutCount >= 2, detail: `${fullWorkoutCount} this week` },
@@ -380,8 +389,8 @@ function computeWeeklyGuidelines(entries){
 }
 
 function renderRadarSVG(data, size){
-  size = size || 300; // internal coordinate space; actual rendered size is responsive via CSS below
-  const cx = size/2, cy = size/2, r = size/2 - 58;
+  size = size || 360; // internal coordinate space; actual rendered size is responsive via CSS below
+  const cx = size/2, cy = size/2, r = size/2 - 75;
   const n = data.length;
   const angle = i => (Math.PI*2*i/n) - Math.PI/2;
   const pt = (i, frac) => [cx + r*frac*Math.cos(angle(i)), cy + r*frac*Math.sin(angle(i))];
@@ -390,14 +399,17 @@ function renderRadarSVG(data, size){
     return `<polygon points="${pts}" fill="none" stroke="var(--border)" stroke-width="1"/>`;
   }).join('');
   const spokes = data.map((d,i)=> { const [x,y]=pt(i,1); return `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="var(--border)" stroke-width="1"/>`; }).join('');
-  const dataPts = data.map((d,i)=> pt(i, Math.min(1, d.pct/100)).join(',')).join(' ');
+  // Cap the visual fill at 130%, not 100% — so doing more than your target actually shows up as
+  // poking out past the dashed target ring, instead of being invisibly capped at the same edge
+  // as someone who did exactly the target.
+  const dataPts = data.map((d,i)=> pt(i, Math.min(1.3, d.pct/100)).join(',')).join(' ');
   const targetPts = data.map((d,i)=> pt(i,1).join(',')).join(' ');
   const labels = data.map((d,i)=> {
-    const [x,y] = pt(i, 1.12);
-    const anchor = Math.abs(Math.cos(angle(i))) < 0.3 ? 'middle' : (Math.cos(angle(i)) > 0 ? 'start' : 'end');
+    const [x,y] = pt(i, 1.4);
+    const anchor = Math.abs(Math.cos(angle(i))) < 0.2 ? 'middle' : (Math.cos(angle(i)) > 0 ? 'start' : 'end');
     return `<text x="${x}" y="${y}" fill="var(--muted)" font-size="9.5" text-anchor="${anchor}" dominant-baseline="middle">${escHtml(d.axis)}</text>`;
   }).join('');
-  return `<svg viewBox="0 0 ${size} ${size}" style="width:100%;max-width:300px;height:auto;display:block;overflow:visible;">
+  return `<svg viewBox="0 0 ${size} ${size}" style="width:100%;max-width:320px;height:auto;display:block;overflow:visible;">
     ${rings}${spokes}
     <polygon points="${targetPts}" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3,3"/>
     <polygon points="${dataPts}" fill="rgba(204,155,60,.35)" stroke="var(--gold)" stroke-width="2"/>
@@ -476,6 +488,37 @@ function getWeakPointProfile(){
   App.entries.forEach(e => (e.focus||[]).forEach(a => { counts[a] = (counts[a]||0) + 1; }));
   const leastWorked = Object.entries(counts).sort((a,b)=> a[1]-b[1]).slice(0,3).map(x=>x[0]);
   return { categoryRank, leastWorked };
+}
+
+// Synthesizes recent climbing shortcomings and neglected training areas into one summary —
+// pure computation from data already tracked elsewhere, no API call needed.
+function computeBriefing(entries){
+  const guidelines = computeWeeklyGuidelines(entries);
+  const missedGuidelines = guidelines.filter(g => !g.ok).map(g => g.label);
+  const radar = computeWeeklyRadarData(entries);
+  const weakRadarAxes = radar.filter(r => r.pct < 40).map(r => r.axis);
+  const recentDays = dayList(entries).slice(0, 14);
+  const failureCounts = {};
+  recentDays.forEach(d => d.entries.forEach(e => (e.failurePoints||[]).forEach(f => { failureCounts[f] = (failureCounts[f]||0) + 1; })));
+  const topFailures = Object.entries(failureCounts).filter(x=>x[1]>=2).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]);
+  const weak = getWeakPointProfile();
+  return { missedGuidelines, weakRadarAxes, topFailures, leastWorked: weak.leastWorked, categoryRank: weak.categoryRank };
+}
+function renderBriefingCard(entries){
+  if (entries.length < 3) return ''; // not enough data yet to say anything meaningful
+  const b = computeBriefing(entries);
+  const lines = [];
+  if (b.topFailures.length) lines.push(`Recently breaking down on: <b>${escHtml(b.topFailures.join(', '))}</b>.`);
+  if (b.weakRadarAxes.length) lines.push(`Running light this week on: <b>${escHtml(b.weakRadarAxes.join(', '))}</b>.`);
+  if (b.missedGuidelines.length) lines.push(`Weekly guidelines not yet hit: <b>${escHtml(b.missedGuidelines.join(', '))}</b>.`);
+  if (b.leastWorked.length) lines.push(`Least-practiced focus areas lately: <b>${escHtml(b.leastWorked.join(', '))}</b>.`);
+  if (b.categoryRank) lines.push(`From your last weak-point check-in, weakest category: <b>${escHtml(b.categoryRank[0][0])}</b>.`);
+  if (!lines.length) return `<div class="card"><h2>Training briefing</h2><p class="small muted">Nothing standing out right now — recent training looks reasonably balanced.</p></div>`;
+  return `<div class="card">
+    <h2>Training briefing</h2>
+    <p class="small muted">A quick synthesis of recent shortcomings and neglected areas — not a plan, just what to keep in mind.</p>
+    ${lines.map(l=>`<p class="small" style="margin:6px 0;">${l}</p>`).join('')}
+  </div>`;
 }
 
 function climbingSessionsSinceLastAssessment(){
@@ -684,17 +727,24 @@ async function askClaude(feedback){
       "patterns, their own weekly strength-training guidelines, and today's context. Give a single, specific, " +
       "concrete plan for today's session, sized to the exact time budget given. Use short list format with rough " +
       "durations/sets/reps, no fluff, no disclaimers. Follow the phase guideline loosely, not rigidly.\n\n" +
-      "STRUCTURE REQUIREMENT for any day that includes climbing: always include, in this order — (1) warmup off " +
+      "ONLY include the session type(s) actually requested below — nothing else. If 'Climbing' is not among the " +
+      "requested session type(s), do not include any climbing, on-wall movement, route, or boulder-problem content " +
+      "anywhere in the plan, even briefly — this is a pure off-the-wall training day built only from the requested " +
+      "modalities (strength/antagonist/cardio/core/fingers/mobility). Don't default to climbing content just because " +
+      "you're a climbing coach.\n\n" +
+      "STRUCTURE REQUIREMENT, only when 'Climbing' IS among the requested session types: always include, in this " +
+      "order — (1) warmup off " +
       "the wall — general movement prep to get the body ready (joint circles, activation drills, light dynamic " +
       "stretching — not on-wall climbing), (2) light easy climbing as a second warmup phase, (3) the main climbing " +
       "volume, (4) some near-limit/limit climbing, (5) climbing-related strength or power exercise, " +
       "(6) cooldown/stabilizer work. Never drop a piece, but vary the AMOUNT of each — how much climbing, how much " +
       "antagonist/stabilizer, how much cardio — based on the phase, time budget, and the patterns/weekly-rhythm notes " +
       "below. Design climbing portions around 4-8 move problems or route laps with real rest between attempts — never " +
-      "a single move drilled to exhaustion, and never just 20 minutes projecting one hard climb. On non-climbing days, " +
-      "build a real mobility/general-movement session, not just a stretch list — center it on the mobility focus " +
-      "area if one is given — and if it fits the time budget, consider drawing from their own workout templates " +
-      "(core circuit, leg day, upper tabata, TRX, or the full efficient-workout structure) rather than inventing " +
+      "a single move drilled to exhaustion, and never just 20 minutes projecting one hard climb. When Climbing is not " +
+      "requested, still shape the session as warmup → main work → cooldown using only the requested modalities — " +
+      "build a real mobility/general-movement session where relevant, not just a stretch list — center it on the " +
+      "mobility focus area if one is given — and if it fits the time budget, consider drawing from their own workout " +
+      "templates (core circuit, upper tabata, TRX, or the full efficient-workout structure) rather than inventing " +
       "something generic.\n\n" +
       "If a pattern flag or weekly-rhythm note is relevant, address it directly in the plan (e.g. slot in finger work " +
       "or antagonist work if it's been skipped, or flag that a rest day is overdue) and say briefly why — but weigh " +
@@ -714,7 +764,7 @@ async function askClaude(feedback){
       `Detected patterns: ${flags.length ? flags.join(' | ') : 'none flagged'}\n\n` +
       `Recent log, one line per calendar day (most recent last):\n${recent}\n\n` +
       `Today:\n- Minutes available: ${d.minutes}\n- Feeling: ${FEELING_SCALE.find(f=>f.v===d.feeling).l} (${d.feeling}/5)\n` +
-      `- Location: ${d.location}\n- Session type(s) wanted: ${d.sessionTypes.join(', ') || 'no preference'}\n- Priority focus: ${focusLine}\n` +
+      `- Session type(s) wanted: ${d.sessionTypes.join(', ') || 'no preference'}\n- Priority focus: ${focusLine}\n` +
       (d.mobilityFocus.length ? `- Mobility focus: ${d.mobilityFocus.join(', ')}\n` : '') + `\n` +
       `Give today's plan.`;
 
@@ -839,6 +889,7 @@ function renderToday(){
         <div class="small muted">Week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks} &middot; ${App.settings.cycleType} cycle #${cycle.cycleNumber}</div></div>
     </div>
   </div>
+  ${renderBriefingCard(App.entries)}
   ${banners}
   <div class="card">
     <h2>Ask for today's plan</h2>
@@ -848,9 +899,6 @@ function renderToday(){
     <div class="field"><label>How you're feeling</label>
       ${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setAskFeeling')}
       <div class="scale-caption" style="margin-top:2px;"><span>1 = flat</span><span>5 = dialed</span></div>
-    </div>
-    <div class="field"><label>Where</label>
-      ${pillsHTML(['Indoor','Outdoor'], d.location, 'setAskLocation', {sm:true})}
     </div>
     <div class="field"><label>Session type(s) wanted</label>
       ${pillsHTML(SESSION_TYPE_OPTIONS, d.sessionTypes, 'toggleAskType')}
@@ -897,9 +945,18 @@ function renderToday(){
     </div>` : ''}
     <div class="field" style="margin-top:12px;">
       <label>Want to adjust this?</label>
-      <textarea placeholder="e.g. swap the finger work for more core, I only actually have 30 min, less bouldering today..." oninput="App.ui.planFeedback=this.value">${escHtml(App.ui.planFeedback)}</textarea>
-      <button class="btn btn-secondary" style="margin-top:8px;" onclick="askClaude(App.ui.planFeedback)" ${App.ui.planLoading || !App.ui.planFeedback.trim() ? 'disabled' : ''}>${App.ui.planLoading ? 'Thinking…' : 'Regenerate with this feedback'}</button>
+      <textarea placeholder="e.g. swap the finger work for more core, I only actually have 30 min, less bouldering today..." oninput="App.ui.planFeedback=this.value; document.getElementById('regenBtn').disabled = !this.value.trim();">${escHtml(App.ui.planFeedback)}</textarea>
+      <button id="regenBtn" class="btn btn-secondary" style="margin-top:8px;" onclick="askClaude(App.ui.planFeedback)" ${App.ui.planLoading || !App.ui.planFeedback.trim() ? 'disabled' : ''}>${App.ui.planLoading ? 'Thinking…' : 'Regenerate with this feedback'}</button>
     </div>` : ''}
+  </div>`;
+}
+
+function sliderRow(label, field, value, max){
+  max = max || 120;
+  const id = 'slider_' + field;
+  return `<div class="field"><label>${label}: <b id="${id}_val">${value}</b> min</label>
+    <input type="range" min="0" max="${max}" step="5" value="${value}"
+      oninput="App.ui.logDraft.${field}=Number(this.value); document.getElementById('${id}_val').textContent=this.value;">
   </div>`;
 }
 
@@ -907,6 +964,8 @@ function renderLog(){
   const d = App.ui.logDraft;
   const isClimbing = d.type === 'Climbing';
   const isRest = d.type === 'Rest';
+  const isStrengthLike = d.type === 'Strength' || d.type === 'Antagonist / Stabilizer';
+  const isCore = d.type === 'Core Workout';
   const editing = !!App.ui.editingId;
   return `
   <div class="card">
@@ -919,9 +978,6 @@ function renderLog(){
           ${SESSION_TYPE_OPTIONS.concat(['Rest']).map(t=>`<option value="${t}" ${d.type===t?'selected':''}>${t}</option>`).join('')}
         </select>
       </div>
-    </div>
-    <div class="field"><label>Duration (minutes)</label>
-      <input type="number" min="0" max="300" value="${d.duration}" oninput="App.ui.logDraft.duration=this.value">
     </div>
     <div class="field"><label>How'd it go (1 = flat, 5 = dialed)</label>${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setLogFeeling')}</div>
     ${isClimbing ? `
@@ -941,37 +997,35 @@ function renderLog(){
     <div class="field"><label>Focus areas worked</label>${pillsHTML(FOCUS_AREAS, d.focus, 'toggleLogFocus', {sm:true})}</div>
     <div class="field"><label>Wall angle</label>${pillsHTML(WALL_ANGLES, d.wallAngle, 'toggleLogWall', {sm:true})}</div>
     <div class="field"><label>Hold types</label>${pillsHTML(HOLD_TYPES, d.holdTypes, 'toggleLogHold', {sm:true})}</div>
-    <h3>Time spent (minutes)</h3>
-    <p class="small muted">Log stretching, mobility, or antagonist work as their own entry on the same date if you did them separately — the app combines same-day entries into one day, it won't count as extra days.</p>
-    <div class="row2">
-      <div class="field"><label>Climbing</label><input type="number" min="0" value="${d.timeClimb}" oninput="App.ui.logDraft.timeClimb=this.value"></div>
-      <div class="field"><label>Finger strength</label><input type="number" min="0" value="${d.timeFingers}" oninput="App.ui.logDraft.timeFingers=this.value"></div>
-      <div class="field"><label>Strength</label><input type="number" min="0" value="${d.timeStrength}" oninput="App.ui.logDraft.timeStrength=this.value"></div>
-      <div class="field"><label>Antagonist/stabilizer</label><input type="number" min="0" value="${d.timeAntag}" oninput="App.ui.logDraft.timeAntag=this.value"></div>
-      <div class="field"><label>Core</label><input type="number" min="0" value="${d.timeCore}" oninput="App.ui.logDraft.timeCore=this.value"></div>
-      <div class="field"><label>Mobility</label><input type="number" min="0" value="${d.timeMobility}" oninput="App.ui.logDraft.timeMobility=this.value"></div>
-      <div class="field"><label>Cardio</label><input type="number" min="0" value="${d.timeCardio}" oninput="App.ui.logDraft.timeCardio=this.value"></div>
-    </div>
+    ` : isRest ? '' : `
+    ${isStrengthLike ? `
+    <div class="field"><label>Muscle group</label>${pillsHTML(MUSCLE_GROUPS, d.muscleGroup, 'toggleMuscleGroup', {sm:true})}</div>
+    <div class="field"><label>Power level</label>${pillsHTML(POWER_LEVELS, d.powerLevel, 'setPowerLevel', {sm:true})}</div>
+    ` : ''}
+    ${isCore ? `
+    <div class="field"><label>Region</label>${pillsHTML(CORE_REGIONS, d.coreRegion, 'toggleCoreRegion', {sm:true})}</div>
+    <div class="field"><label>Movement type</label>${pillsHTML(CORE_MOVEMENT_TYPES, d.coreMovementType, 'toggleCoreMovementType', {sm:true})}</div>
+    ` : ''}
+    <div class="field"><label>Named routine (optional)</label>${pillsHTML(TYPE_RELEVANT_STYLES[d.type] || WORKOUT_STYLES, d.workoutStyles, 'toggleLogWorkoutStyle', {sm:true})}</div>
+    ${d.workoutStyles.length ? `
+    <div class="field"><label>Specific exercises (optional)</label>
+      ${d.workoutStyles.map(style => `<div class="small muted" style="margin:8px 0 4px;">${escHtml(style)}</div>${pillsHTML(EXERCISE_LIBRARY[style]||[], d.exercisesDone, 'toggleLogExercise', {sm:true})}`).join('')}
+    </div>` : ''}
+    `}
+    <h3>Time spent</h3>
+    <p class="small muted">Total time for the entry is just the sum of these — no separate total to keep in sync. Log stretching, mobility, or antagonist work as their own entry on the same date if you did them separately; the app combines same-day entries into one day, it won't count as extra days.</p>
+    ${isClimbing ? sliderRow('Climbing', 'timeClimb', d.timeClimb, 180) : ''}
+    ${sliderRow('Finger strength', 'timeFingers', d.timeFingers)}
+    ${sliderRow('Strength', 'timeStrength', d.timeStrength)}
+    ${sliderRow('Antagonist/stabilizer', 'timeAntag', d.timeAntag)}
+    ${sliderRow('Core', 'timeCore', d.timeCore)}
+    ${sliderRow('Mobility', 'timeMobility', d.timeMobility)}
+    ${sliderRow('Cardio', 'timeCardio', d.timeCardio)}
+    ${isClimbing ? `
     <div class="field"><label>What broke down</label>
       ${pillsHTML(FAILURE_POINT_OPTIONS, d.failurePoints, 'toggleLogFailurePoint', {sm:true})}
       <textarea style="margin-top:8px;" placeholder="Any detail worth adding..." oninput="App.ui.logDraft.failurePointsOther=this.value">${escHtml(d.failurePointsOther)}</textarea>
-    </div>
-    ` : isRest ? '' : `
-    <div class="field"><label>Workout style</label>${pillsHTML(TYPE_RELEVANT_STYLES[d.type] || WORKOUT_STYLES, d.workoutStyles, 'toggleLogWorkoutStyle', {sm:true})}</div>
-    ${d.workoutStyles.length ? `
-    <div class="field"><label>What did you do</label>
-      ${d.workoutStyles.map(style => `<div class="small muted" style="margin:8px 0 4px;">${escHtml(style)}</div>${pillsHTML(EXERCISE_LIBRARY[style]||[], d.exercisesDone, 'toggleLogExercise', {sm:true})}`).join('')}
-    </div>` : `<p class="small muted">Pick a workout style above to see exercise options, or just log time + notes below.</p>`}
-    <div class="row2">
-      <div class="field"><label>Strength</label><input type="number" min="0" value="${d.timeStrength}" oninput="App.ui.logDraft.timeStrength=this.value"></div>
-      <div class="field"><label>Core</label><input type="number" min="0" value="${d.timeCore}" oninput="App.ui.logDraft.timeCore=this.value"></div>
-      <div class="field"><label>Legs</label><input type="number" min="0" value="${d.timeLegs}" oninput="App.ui.logDraft.timeLegs=this.value"></div>
-      <div class="field"><label>Antagonist/stabilizer</label><input type="number" min="0" value="${d.timeAntag}" oninput="App.ui.logDraft.timeAntag=this.value"></div>
-      <div class="field"><label>Mobility</label><input type="number" min="0" value="${d.timeMobility}" oninput="App.ui.logDraft.timeMobility=this.value"></div>
-      <div class="field"><label>Cardio</label><input type="number" min="0" value="${d.timeCardio}" oninput="App.ui.logDraft.timeCardio=this.value"></div>
-      <div class="field"><label>Finger strength</label><input type="number" min="0" value="${d.timeFingers}" oninput="App.ui.logDraft.timeFingers=this.value"></div>
-    </div>
-    `}
+    </div>` : ''}
     <div class="field"><label>Pain or discomfort</label>${pillsHTML(PAIN_OPTIONS, d.pain, 'setLogPain', {sm:true})}</div>
     <div class="field"><label>Notes</label>
       <textarea placeholder="Anything else worth remembering..." oninput="App.ui.logDraft.notes=this.value">${escHtml(d.notes)}</textarea>
@@ -1016,22 +1070,34 @@ function renderHistory(){
     <div class="bar-track"><div class="bar-fill" style="width:${counts[a]/maxCount*100}%"></div></div>
     <div class="bar-val">${counts[a]}</div></div>`).join('');
 
-  // day type frequency
-  const dtCounts = {}; DAY_TYPES.forEach(a=>dtCounts[a]=0);
-  days.forEach(d => d.dayTypes.forEach(a=>{dtCounts[a]=(dtCounts[a]||0)+1;}));
-  const maxDt = Math.max(1, ...Object.values(dtCounts));
-  const dtBars = DAY_TYPES.map(a => `<div class="bar-row"><div class="bar-label">${a}</div>
-    <div class="bar-track"><div class="bar-fill" style="width:${dtCounts[a]/maxDt*100}%"></div></div>
-    <div class="bar-val">${dtCounts[a]}</div></div>`).join('');
+  // Broad category comparison: Climbing vs Drilling vs Exercise vs Cardio vs Core.
+  // A "drilling" day is a climbing day tagged Skills/Technique; a plain climbing day otherwise.
+  const broadCats = { Climbing:0, Drilling:0, Exercise:0, Cardio:0, Core:0 };
+  days.forEach(d => {
+    const climbingEntries = d.entries.filter(e => e.type === 'Climbing');
+    if (climbingEntries.length) {
+      if (climbingEntries.some(e => (e.dayTypes||[]).includes('Skills/Technique'))) broadCats.Drilling++;
+      else broadCats.Climbing++;
+    }
+    if (d.timeStrength > 0 || d.timeAntag > 0) broadCats.Exercise++;
+    if (d.timeCardio > 0) broadCats.Cardio++;
+    if (d.timeCore > 0) broadCats.Core++;
+  });
+  const maxBroad = Math.max(1, ...Object.values(broadCats));
+  const dtBars = Object.keys(broadCats).map(a => `<div class="bar-row"><div class="bar-label">${a}</div>
+    <div class="bar-track"><div class="bar-fill" style="width:${broadCats[a]/maxBroad*100}%"></div></div>
+    <div class="bar-val">${broadCats[a]}</div></div>`).join('');
 
   // weekly balance radar + template comparison
   const radarData = computeWeeklyRadarData(entries);
   const tmpl = compareToWeeklyTemplate(entries);
-  const tmplRow = tmpl.rows.map(r => `<div class="stat" style="opacity:${r.isFuture?0.4:1}">
-      <div class="lbl">${r.day}</div>
-      <div class="small" style="margin-top:4px;">${r.isFuture ? '—' : escHtml(r.actual)}</div>
-      <div class="small muted">(usually ${r.template})</div>
-    </div>`).join('');
+  const tmplRow = tmpl.rows.map(r => {
+    const mismatch = !r.isFuture && r.actual !== r.template && r.actual !== 'No entry';
+    return `<div class="bar-row" style="align-items:center;opacity:${r.isFuture?0.45:1};">
+      <div class="bar-label" style="width:36px;flex:none;">${r.day}</div>
+      <div style="flex:1;font-size:13px;${mismatch?'color:var(--red);':''}">${r.isFuture ? '—' : escHtml(r.actual)} <span class="small muted">(usually ${r.template})</span></div>
+    </div>`;
+  }).join('');
   const guidelines = computeWeeklyGuidelines(entries);
   const guidelineRows = guidelines.map(g => `<div class="bar-row" style="align-items:flex-start;">
       <div style="width:20px;flex:none;color:${g.ok?'var(--teal)':'var(--muted)'};font-weight:700;">${g.ok?'✓':'—'}</div>
@@ -1092,13 +1158,13 @@ function renderHistory(){
   <div class="card">
     <h2>This week vs. your usual rhythm</h2>
     <p class="small muted">Reference: Mon rest &middot; Tue climb &middot; Wed exercise &middot; Thu climb &middot; Fri rest &middot; Sat/Sun climb.</p>
-    <div class="statgrid" style="grid-template-columns:repeat(7,1fr);">${tmplRow}</div>
+    <div class="barlist">${tmplRow}</div>
     ${tmpl.notes.length ? `<p class="small" style="margin-top:10px;color:var(--red);">${tmpl.notes.join(' ')}</p>` : `<p class="small muted" style="margin-top:10px;">Tracking the usual rhythm so far this week.</p>`}
   </div>
   <div class="card"><h2>Last 12 weeks</h2><div class="heatgrid">${heat}</div></div>
   <div class="card"><h2>Minutes, last 14 days</h2><div class="barlist">${minBars}</div></div>
   <div class="card"><h2>Focus area attention</h2><div class="barlist">${focusBars}</div></div>
-  <div class="card"><h2>Day types, over time</h2><div class="barlist">${dtBars}</div></div>
+  <div class="card"><h2>Climbing vs. drilling vs. exercise vs. cardio vs. core</h2><div class="barlist">${dtBars}</div></div>
   <div class="card"><h2>Weak-point check-ins</h2>${assessRows}</div>
   <div class="card"><h2>Entries</h2>${entryRows}</div>`;
 }
@@ -1173,7 +1239,6 @@ function renderQuestionnaire(){
 
 // ---- Event handlers (called from inline onclick in templates) ----
 function setAskFeeling(v){ App.ui.askDraft.feeling = Number(v); App.render(); }
-function setAskLocation(loc){ App.ui.askDraft.location = loc; App.render(); }
 function toggleAskType(t){ const arr = App.ui.askDraft.sessionTypes; const i = arr.indexOf(t);
   if (i>-1) arr.splice(i,1); else arr.push(t); App.render(); }
 function toggleMobilityFocus(a){ toggleArr(App.ui.askDraft.mobilityFocus, a); App.render(); }
@@ -1194,10 +1259,12 @@ function setLogIntensity(v){ App.ui.logDraft.intensity = v; App.render(); }
 function setLogPain(v){ App.ui.logDraft.pain = v; App.render(); }
 function setLogType(t){
   App.ui.logDraft.type = t;
-  // Reset every time, not just when empty — otherwise a style picked for a previous type
+  // Reset every time, not just when empty — otherwise a style/tag picked for a previous type
   // choice sticks around invisibly once the picker filters to the new type's relevant list.
   App.ui.logDraft.workoutStyles = TYPE_TO_WORKOUT_STYLE[t] ? [TYPE_TO_WORKOUT_STYLE[t]] : [];
   App.ui.logDraft.exercisesDone = [];
+  App.ui.logDraft.muscleGroup = []; App.ui.logDraft.powerLevel = '';
+  App.ui.logDraft.coreRegion = []; App.ui.logDraft.coreMovementType = [];
   App.render();
 }
 function toggleLogFocus(a){ toggleArr(App.ui.logDraft.focus, a); App.render(); }
@@ -1207,6 +1274,10 @@ function toggleLogDayType(a){ toggleArr(App.ui.logDraft.dayTypes, a); App.render
 function toggleLogFailurePoint(a){ toggleArr(App.ui.logDraft.failurePoints, a); App.render(); }
 function toggleLogWorkoutStyle(a){ toggleArr(App.ui.logDraft.workoutStyles, a); App.render(); }
 function toggleLogExercise(a){ toggleArr(App.ui.logDraft.exercisesDone, a); App.render(); }
+function toggleMuscleGroup(a){ toggleArr(App.ui.logDraft.muscleGroup, a); App.render(); }
+function setPowerLevel(v){ App.ui.logDraft.powerLevel = v; App.render(); }
+function toggleCoreRegion(a){ toggleArr(App.ui.logDraft.coreRegion, a); App.render(); }
+function toggleCoreMovementType(a){ toggleArr(App.ui.logDraft.coreMovementType, a); App.render(); }
 function setClimbLocation(loc){ App.ui.climbLocationDraft = loc; App.render(); }
 function toggleArr(arr, v){ const i=arr.indexOf(v); if (i>-1) arr.splice(i,1); else arr.push(v); }
 
@@ -1257,9 +1328,9 @@ function importData(file){
 
 const TYPE_TO_TIME_FIELD = {
   'Antagonist / Stabilizer': 'timeAntag', 'Mobility / Stretch': 'timeMobility', 'Strength': 'timeStrength', 'Cardio': 'timeCardio',
-  'Core Workout': 'timeCore', 'Leg Workout': 'timeLegs',
+  'Core Workout': 'timeCore', 'Fingers': 'timeFingers',
 };
-const TYPE_TO_WORKOUT_STYLE = { 'Core Workout': 'Core Circuit', 'Leg Workout': 'Leg Day', 'Mobility / Stretch': 'Stretch/Mobility' };
+const TYPE_TO_WORKOUT_STYLE = { 'Core Workout': 'Core Circuit', 'Mobility / Stretch': 'Stretch/Mobility', 'Fingers': 'Fingers' };
 function editEntry(id){
   const e = App.entries.find(x => x.id === id);
   if (!e) return;
@@ -1284,20 +1355,23 @@ function cancelEdit(){
   App.ui.climbsDraft = [];
   App.render();
 }
+const TIME_FIELDS = ['timeClimb','timeFingers','timeStrength','timeAntag','timeCore','timeMobility','timeCardio'];
 function submitLog(){
   const d = App.ui.logDraft;
   const entry = Object.assign({}, d, { id: App.ui.editingId || uid(), climbs: App.ui.climbsDraft.slice() });
   if (entry.type !== 'Climbing') {
     // These fields are hidden from the form for non-climbing entries, but freshLogDraft() still
-    // carries default values for them — zero/clear them explicitly so stale defaults (e.g. a leftover
-    // timeClimb) never leak into day-aggregation for a day that had no actual climbing on it.
+    // carries default values for them — zero/clear them explicitly so stale defaults never leak
+    // into day-aggregation for a day that had no actual climbing on it.
     entry.timeClimb = 0; entry.intensity = ''; entry.dayTypes = []; entry.focus = [];
     entry.wallAngle = []; entry.holdTypes = []; entry.failurePoints = []; entry.failurePointsOther = ''; entry.climbs = [];
   }
-  // Standalone non-climbing entries (logged as their own type) only expose a single Duration field —
-  // map that into the matching time-bucket so day-aggregation, patterns, and the radar chart see it.
-  const bucket = TYPE_TO_TIME_FIELD[entry.type];
-  if (bucket && !entry[bucket]) entry[bucket] = Number(entry.duration) || 0;
+  if (entry.type !== 'Strength' && entry.type !== 'Antagonist / Stabilizer') { entry.muscleGroup = []; entry.powerLevel = ''; }
+  if (entry.type !== 'Core Workout') { entry.coreRegion = []; entry.coreMovementType = []; }
+  // Duration is never typed in separately — it's always the sum of the actual time-spent sliders.
+  // (The old design had a standalone Duration field that could silently drift out of sync with
+  // the sliders — that mismatch was the root cause of mobility minutes not showing up correctly.)
+  entry.duration = TIME_FIELDS.reduce((sum, f) => sum + (Number(entry[f]) || 0), 0);
 
   if (App.ui.editingId) {
     // Editing an existing entry (e.g. fixing a mis-entered date) — replace by id.
@@ -1354,7 +1428,7 @@ window.App = App;
 window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
 window.EXERCISE_LIBRARY = EXERCISE_LIBRARY; window.WORKOUT_STYLES = WORKOUT_STYLES;
 window.FOCUS_AREAS = FOCUS_AREAS; window.ADHERENCE_OPTIONS = ADHERENCE_OPTIONS;
-window.setAskFeeling = setAskFeeling; window.toggleAskType = toggleAskType; window.setAskLocation = setAskLocation;
+window.setAskFeeling = setAskFeeling; window.toggleAskType = toggleAskType;
 window.setFocusMode = setFocusMode; window.setFocusPick = setFocusPick; window.setFocusSecondary = setFocusSecondary;
 window.setLogFeeling = setLogFeeling; window.setLogIntensity = setLogIntensity; window.setLogPain = setLogPain;
 window.toggleLogFocus = toggleLogFocus; window.toggleLogWall = toggleLogWall; window.toggleLogHold = toggleLogHold;
