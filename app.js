@@ -502,22 +502,32 @@ function computeBriefing(entries){
   recentDays.forEach(d => d.entries.forEach(e => arr(e.failurePoints).forEach(f => { failureCounts[f] = (failureCounts[f]||0) + 1; })));
   const topFailures = Object.entries(failureCounts).filter(x=>x[1]>=2).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]);
   const weak = getWeakPointProfile();
-  return { missedGuidelines, weakRadarAxes, topFailures, leastWorked: weak.leastWorked, categoryRank: weak.categoryRank };
+  // Grades actually climbed recently — computable directly, unlike notes (free text, see below).
+  const recentClimbs = recentDays.flatMap(d => d.entries.flatMap(e => arr(e.climbs)));
+  const gradeCounts = {};
+  recentClimbs.forEach(c => { if (c.grade) gradeCounts[c.grade] = (gradeCounts[c.grade]||0) + (Number(c.count)||1); });
+  const topGrades = Object.entries(gradeCounts).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>`${x[0]} (×${x[1]})`);
+  // Notes are free text — a local, non-AI computation can surface them but can't meaningfully
+  // "understand" them the way the generated plan (which goes through Claude) actually can.
+  const recentNotes = recentDays.flatMap(d => d.entries.filter(e=>e.notes).map(e => `${d.date}: "${e.notes}"`)).slice(-3);
+  return { missedGuidelines, weakRadarAxes, topFailures, leastWorked: weak.leastWorked, categoryRank: weak.categoryRank, topGrades, recentNotes };
 }
 function renderBriefingCard(entries){
   if (entries.length < 3) return ''; // not enough data yet to say anything meaningful
   const b = computeBriefing(entries);
   const lines = [];
+  if (b.topGrades.length) lines.push(`Recent climbs: <b>${escHtml(b.topGrades.join(', '))}</b>.`);
   if (b.topFailures.length) lines.push(`Recently breaking down on: <b>${escHtml(b.topFailures.join(', '))}</b>.`);
   if (b.weakRadarAxes.length) lines.push(`Running light this week on: <b>${escHtml(b.weakRadarAxes.join(', '))}</b>.`);
   if (b.missedGuidelines.length) lines.push(`Weekly guidelines not yet hit: <b>${escHtml(b.missedGuidelines.join(', '))}</b>.`);
   if (b.leastWorked.length) lines.push(`Least-practiced focus areas lately: <b>${escHtml(b.leastWorked.join(', '))}</b>.`);
   if (b.categoryRank) lines.push(`From your last weak-point check-in, weakest category: <b>${escHtml(b.categoryRank[0][0])}</b>.`);
-  if (!lines.length) return `<div class="card"><h2>Training briefing</h2><p class="small muted">Nothing standing out right now — recent training looks reasonably balanced.</p></div>`;
+  if (!lines.length && !b.recentNotes.length) return `<div class="card"><h2>Training briefing</h2><p class="small muted">Nothing standing out right now — recent training looks reasonably balanced.</p></div>`;
   return `<div class="card">
     <h2>Training briefing</h2>
     <p class="small muted">A quick synthesis of recent shortcomings and neglected areas — not a plan, just what to keep in mind.</p>
     ${lines.map(l=>`<p class="small" style="margin:6px 0;">${l}</p>`).join('')}
+    ${b.recentNotes.length ? `<p class="small muted" style="margin-top:8px;">Your recent notes (shown as written — this briefing doesn't analyze free text, but the generated plan reads these too):</p>${b.recentNotes.map(n=>`<p class="small" style="margin:2px 0;">${escHtml(n)}</p>`).join('')}` : ''}
   </div>`;
 }
 
@@ -683,15 +693,36 @@ async function askClaude(feedback){
 
     const recent = dayList(App.entries).slice(0,14).reverse().map(d => {
       const cls = classifyDay(d);
-      const failureStr = d.entries.flatMap(e => arr(e.failurePoints)).join(', ');
       const parts = [`${d.totalMinutes}min total`, cls];
       if (d.dayTypes.length) parts.push('day type: '+d.dayTypes.join('/'));
       if (d.intensities.length) parts.push('intensity: '+d.intensities.join('/'));
       if (d.focus.length) parts.push('focus: '+d.focus.join(', '));
       parts.push(`time — climb:${d.timeClimb} fingers:${d.timeFingers} strength:${d.timeStrength} antag:${d.timeAntag} core:${d.timeCore} mobility:${d.timeMobility} cardio:${d.timeCardio}`);
-      if (failureStr) parts.push('broke down on: '+failureStr);
       if (d.pain !== 'None') parts.push('PAIN: '+d.pain);
-      return `${d.date}: ${parts.join(', ')}`;
+      // Per-entry detail — every field actually entered that day, not just the aggregated totals.
+      const entryDetails = d.entries.map(e => {
+        const bits = [];
+        const climbs = arr(e.climbs);
+        if (climbs.length) bits.push('climbs: ' + climbs.map(c => `${c.grade}×${c.count}${c.location?' ('+c.location+')':''}`).join(', '));
+        const failures = arr(e.failurePoints);
+        if (failures.length) bits.push('broke down on: ' + failures.join(', '));
+        if (e.failurePointsOther) bits.push('failure detail: ' + e.failurePointsOther);
+        const wStyles = arr(e.workoutStyles);
+        if (wStyles.length) bits.push('routine: ' + wStyles.join(', '));
+        const exs = arr(e.exercisesDone);
+        if (exs.length) bits.push('exercises: ' + exs.join(', '));
+        const mg = arr(e.muscleGroup);
+        if (mg.length) bits.push('muscle group: ' + mg.join(', '));
+        if (e.powerLevel) bits.push('power level: ' + e.powerLevel);
+        const cr = arr(e.coreRegion);
+        if (cr.length) bits.push('core region: ' + cr.join(', '));
+        const cmt = arr(e.coreMovementType);
+        if (cmt.length) bits.push('core movement: ' + cmt.join(', '));
+        if (e.plan && e.planAdherence) bits.push('followed a generated plan: ' + e.planAdherence);
+        if (e.notes) bits.push('notes: "' + e.notes + '"');
+        return bits.length ? `  [${e.type}] ${bits.join('; ')}` : '';
+      }).filter(Boolean).join('\n');
+      return `${d.date}: ${parts.join(', ')}` + (entryDetails ? '\n' + entryDetails : '');
     }).join('\n') || 'No prior entries yet.';
 
     const mostRecentPain = getMostRecentPainStatus(App.entries);
@@ -699,12 +730,17 @@ async function askClaude(feedback){
     const tmplLine = tmpl.notes.length ? tmpl.notes.join(' ') : 'On track with the usual weekly rhythm so far.';
     const guidelines = computeWeeklyGuidelines(App.entries);
     const guidelineLine = guidelines.filter(g=>!g.ok).map(g=>g.label).join(', ') || 'all on track this week';
+    // Weak-point profile is always sent as background, independent of which priority-focus mode
+    // is selected — it shouldn't disappear just because you picked a specific focus area instead.
+    const weakPointLine = weak.categoryRank
+      ? `Weakest category from self-assessment: ${weak.categoryRank[0][0]} (avg ${weak.categoryRank[0][1].toFixed(1)}/5). Least-worked focus areas in the log: ${weak.leastWorked.join(', ')}.`
+      : 'No weak-point check-in taken yet.';
 
     let focusLine = '';
     if (d.focusMode === 'other' && d.focusOther.trim()) {
       focusLine = d.focusOther.trim();
     } else if (d.focusMode === 'weak' && weak.categoryRank) {
-      focusLine = `Weakest category from self-assessment: ${weak.categoryRank[0][0]} (avg ${weak.categoryRank[0][1].toFixed(1)}/5). Least-worked focus areas in the log: ${weak.leastWorked.join(', ')}.`;
+      focusLine = `Auto: use the weak-point profile above.`;
     } else if (d.focusPick) {
       focusLine = d.focusPick;
     } else {
@@ -723,8 +759,15 @@ async function askClaude(feedback){
       "has a full-time job, regular recovery-program meetings, and therapy — respect their time budget exactly, " +
       "don't pad the plan, and don't guilt them about anything they've missed. You're given their training cycle " +
       "phase, a phase-structure guideline, their recent log aggregated by calendar day (a day with multiple logged " +
-      "sub-sessions is already combined into one line — treat it as one day, not several), detected training " +
-      "patterns, their own weekly strength-training guidelines, and today's context. Give a single, specific, " +
+      "sub-sessions is already combined into one line, with a per-entry breakdown underneath showing everything " +
+      "they actually entered that day — specific climbs/grades, what broke down, which routine and exercises, " +
+      "muscle group and power level, core region and movement type, their own free-text notes, and whether they " +
+      "followed a previous generated plan and how closely — treat a day with multiple sub-sessions as one day, not " +
+      "several, but do read the per-entry detail, it's real signal, not filler), detected training patterns, their " +
+      "own weekly strength-training guidelines, their weak-point self-assessment profile, and today's context. Use " +
+      "all of this — specific grades climbed, quoted notes, and the weak-point profile are not decoration, actually " +
+      "factor them into what you prescribe (e.g. a note mentioning a specific move problem, a cluster of climbs at " +
+      "a plateaued grade, or a recurring failure point should visibly shape the plan). Give a single, specific, " +
       "concrete plan for today's session, sized to the exact time budget given. Use short list format with rough " +
       "durations/sets/reps, no fluff, no disclaimers. Follow the phase guideline loosely, not rigidly.\n\n" +
       "ONLY include the session type(s) actually requested below — nothing else. If 'Climbing' is not among the " +
@@ -760,9 +803,10 @@ async function askClaude(feedback){
       `Current pain status (most recent entry): ${mostRecentPain}\n` +
       `This week vs. usual rhythm: ${tmplLine}\n` +
       `Weekly guidelines not yet hit this week: ${guidelineLine}\n` +
+      `Weak-point profile (background context regardless of today's priority-focus choice): ${weakPointLine}\n` +
       (drillLine ? `Climbing portion request: ${drillLine}\n` : '') + `\n` +
       `Detected patterns: ${flags.length ? flags.join(' | ') : 'none flagged'}\n\n` +
-      `Recent log, one line per calendar day (most recent last):\n${recent}\n\n` +
+      `Recent log, per calendar day with every field entered that day (most recent last):\n${recent}\n\n` +
       `Today:\n- Minutes available: ${d.minutes}\n- Feeling: ${FEELING_SCALE.find(f=>f.v===d.feeling).l} (${d.feeling}/5)\n` +
       `- Session type(s) wanted: ${d.sessionTypes.join(', ') || 'no preference'}\n- Priority focus: ${focusLine}\n` +
       (d.mobilityFocus.length ? `- Mobility focus: ${d.mobilityFocus.join(', ')}\n` : '') + `\n` +
