@@ -302,8 +302,8 @@ function aggregateByDay(entries){
     d.timeMobility += Number(e.timeMobility) || 0;
     d.timeCardio += Number(e.timeCardio) || 0;
     if (!d.types.includes(e.type)) d.types.push(e.type);
-    (e.dayTypes||[]).forEach(t => { if (!d.dayTypes.includes(t)) d.dayTypes.push(t); });
-    (e.focus||[]).forEach(t => { if (!d.focus.includes(t)) d.focus.push(t); });
+    arr(e.dayTypes).forEach(t => { if (!d.dayTypes.includes(t)) d.dayTypes.push(t); });
+    arr(e.focus).forEach(t => { if (!d.focus.includes(t)) d.focus.push(t); });
     if (e.intensity) d.intensities.push(e.intensity);
     if (e.pain && e.pain !== 'None') d.pain = e.pain; // any flagged pain that day wins
     d.entries.push(e);
@@ -371,13 +371,13 @@ function computeWeeklyGuidelines(entries){
   const coreDayCount = days.filter(d => d.timeCore > 0).length;
   const coreVariety = new Set();
   days.forEach(d => d.entries.forEach(e => {
-    (e.exercisesDone||[]).forEach(x => { if ((EXERCISE_LIBRARY['Core Circuit']||[]).includes(x)) coreVariety.add(x); });
-    (e.coreRegion||[]).forEach(r => coreVariety.add(r));
+    arr(e.exercisesDone).forEach(x => { if ((EXERCISE_LIBRARY['Core Circuit']||[]).includes(x)) coreVariety.add(x); });
+    arr(e.coreRegion).forEach(r => coreVariety.add(r));
   }));
-  const legDayCount = days.filter(d => d.entries.some(e => (e.muscleGroup||[]).includes('Legs'))).length;
-  const tabataDone = days.some(d => d.entries.some(e => (e.workoutStyles||[]).includes('Upper Tabata')));
-  const trxDone = days.some(d => d.entries.some(e => (e.workoutStyles||[]).includes('TRX — Core') || (e.workoutStyles||[]).includes('TRX — Shoulder')));
-  const fullWorkoutCount = days.filter(d => d.entries.some(e => (e.workoutStyles||[]).includes('Full Efficient Workout'))).length;
+  const legDayCount = days.filter(d => d.entries.some(e => arr(e.muscleGroup).includes('Legs'))).length;
+  const tabataDone = days.some(d => d.entries.some(e => arr(e.workoutStyles).includes('Upper Tabata')));
+  const trxDone = days.some(d => d.entries.some(e => arr(e.workoutStyles).includes('TRX — Core') || arr(e.workoutStyles).includes('TRX — Shoulder')));
+  const fullWorkoutCount = days.filter(d => d.entries.some(e => arr(e.workoutStyles).includes('Full Efficient Workout'))).length;
 
   return [
     { label: 'Core variety, 3-5x/wk', ok: coreVariety.size >= 3 && coreDayCount >= 3, detail: `${coreVariety.size} distinct region(s)/exercise(s), ${coreDayCount} day(s) this week` },
@@ -485,7 +485,7 @@ function getWeakPointProfile(){
   }
   const counts = {};
   FOCUS_AREAS.forEach(a => counts[a] = 0);
-  App.entries.forEach(e => (e.focus||[]).forEach(a => { counts[a] = (counts[a]||0) + 1; }));
+  App.entries.forEach(e => arr(e.focus).forEach(a => { counts[a] = (counts[a]||0) + 1; }));
   const leastWorked = Object.entries(counts).sort((a,b)=> a[1]-b[1]).slice(0,3).map(x=>x[0]);
   return { categoryRank, leastWorked };
 }
@@ -499,7 +499,7 @@ function computeBriefing(entries){
   const weakRadarAxes = radar.filter(r => r.pct < 40).map(r => r.axis);
   const recentDays = dayList(entries).slice(0, 14);
   const failureCounts = {};
-  recentDays.forEach(d => d.entries.forEach(e => (e.failurePoints||[]).forEach(f => { failureCounts[f] = (failureCounts[f]||0) + 1; })));
+  recentDays.forEach(d => d.entries.forEach(e => arr(e.failurePoints).forEach(f => { failureCounts[f] = (failureCounts[f]||0) + 1; })));
   const topFailures = Object.entries(failureCounts).filter(x=>x[1]>=2).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]);
   const weak = getWeakPointProfile();
   return { missedGuidelines, weakRadarAxes, topFailures, leastWorked: weak.leastWorked, categoryRank: weak.categoryRank };
@@ -683,7 +683,7 @@ async function askClaude(feedback){
 
     const recent = dayList(App.entries).slice(0,14).reverse().map(d => {
       const cls = classifyDay(d);
-      const failureStr = d.entries.flatMap(e => [].concat(e.failurePoints||[])).join(', ');
+      const failureStr = d.entries.flatMap(e => arr(e.failurePoints)).join(', ');
       const parts = [`${d.totalMinutes}min total`, cls];
       if (d.dayTypes.length) parts.push('day type: '+d.dayTypes.join('/'));
       if (d.intensities.length) parts.push('intensity: '+d.intensities.join('/'));
@@ -813,6 +813,11 @@ function searchExercise(name){
 }
 function escAttr(s){ return String(s).replace(/'/g, "\\'"); }
 function escHtml(s){ return String(s==null?'':s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+// Some fields (failurePoints, notably) used to be free-text strings in earlier versions of this
+// app before becoming tag arrays. Real accounts have months of entries spanning that change, so
+// every read of these fields goes through this instead of a raw (e.field||[]) — [].concat() turns
+// an old string into a one-item array instead of crashing when something later calls .forEach/.includes/.join on it.
+function arr(x){ return [].concat(x||[]); }
 
 // Shared parser: splits each bullet/numbered line of a generated plan into {prefix, name, rest} —
 // leading marker, the exercise-name portion (before the first : — – or comma), and everything
@@ -1076,7 +1081,7 @@ function renderHistory(){
   days.forEach(d => {
     const climbingEntries = d.entries.filter(e => e.type === 'Climbing');
     if (climbingEntries.length) {
-      if (climbingEntries.some(e => (e.dayTypes||[]).includes('Skills/Technique'))) broadCats.Drilling++;
+      if (climbingEntries.some(e => arr(e.dayTypes).includes('Skills/Technique'))) broadCats.Drilling++;
       else broadCats.Climbing++;
     }
     if (d.timeStrength > 0 || d.timeAntag > 0) broadCats.Exercise++;
@@ -1112,14 +1117,14 @@ function renderHistory(){
       </button>
       ${App.ui.expandedEntry===e.id ? `<div class="entry-body">
         ${e.intensity?`<p><b>Intensity:</b> ${e.intensity}</p>`:''}
-        ${(e.dayTypes&&e.dayTypes.length)?`<p><b>Day type:</b> ${e.dayTypes.join(', ')}</p>`:''}
+        ${arr(e.dayTypes).length?`<p><b>Day type:</b> ${arr(e.dayTypes).join(', ')}</p>`:''}
         ${(e.climbs&&e.climbs.length)?`<p><b>Climbs:</b> ${e.climbs.map(c=>c.grade+' ×'+c.count+(c.location?' ('+c.location+')':'')).join(', ')}</p>`:''}
-        ${(e.focus&&e.focus.length)?`<p><b>Focus:</b> ${e.focus.join(', ')}</p>`:''}
-        ${(e.wallAngle&&e.wallAngle.length)?`<p><b>Wall angle:</b> ${e.wallAngle.join(', ')}</p>`:''}
-        ${(e.holdTypes&&e.holdTypes.length)?`<p><b>Holds:</b> ${e.holdTypes.join(', ')}</p>`:''}
-        ${(e.workoutStyles&&e.workoutStyles.length)?`<p><b>Workout style:</b> ${e.workoutStyles.join(', ')}</p>`:''}
-        ${(e.exercisesDone&&e.exercisesDone.length)?`<p><b>Exercises done:</b> ${e.exercisesDone.join(', ')}</p>`:''}
-        ${(e.failurePoints&&e.failurePoints.length)?`<p><b>Broke down on:</b> ${e.failurePoints.join(', ')}</p>`:''}
+        ${arr(e.focus).length?`<p><b>Focus:</b> ${arr(e.focus).join(', ')}</p>`:''}
+        ${arr(e.wallAngle).length?`<p><b>Wall angle:</b> ${arr(e.wallAngle).join(', ')}</p>`:''}
+        ${arr(e.holdTypes).length?`<p><b>Holds:</b> ${arr(e.holdTypes).join(', ')}</p>`:''}
+        ${arr(e.workoutStyles).length?`<p><b>Workout style:</b> ${arr(e.workoutStyles).join(', ')}</p>`:''}
+        ${arr(e.exercisesDone).length?`<p><b>Exercises done:</b> ${arr(e.exercisesDone).join(', ')}</p>`:''}
+        ${arr(e.failurePoints).length?`<p><b>Broke down on:</b> ${arr(e.failurePoints).join(', ')}</p>`:''}
         ${e.failurePointsOther?`<p><b>Detail:</b> ${escHtml(e.failurePointsOther)}</p>`:''}
         ${e.pain&&e.pain!=='None'?`<p style="color:var(--red)"><b>Pain:</b> ${e.pain}</p>`:''}
         ${e.notes?`<p><b>Notes:</b> ${escHtml(e.notes)}</p>`:''}
@@ -1335,7 +1340,11 @@ function editEntry(id){
   const e = App.entries.find(x => x.id === id);
   if (!e) return;
   App.ui.logDraft = Object.assign(freshLogDraft(), JSON.parse(JSON.stringify(e)));
-  App.ui.climbsDraft = (e.climbs || []).slice();
+  // Older entries may have some of these as free-text strings from before they were tag arrays —
+  // normalize on the way into the editable draft so every downstream handler can assume an array.
+  ['dayTypes','focus','wallAngle','holdTypes','workoutStyles','exercisesDone','muscleGroup','coreRegion','coreMovementType','failurePoints']
+    .forEach(f => { App.ui.logDraft[f] = arr(App.ui.logDraft[f]); });
+  App.ui.climbsDraft = arr(e.climbs).slice();
   App.ui.editingId = id;
   App.setTab('log');
 }
