@@ -231,9 +231,10 @@ function freshLogDraft(){
 }
 function freshAskDraft(){
   return { minutes:60, feeling:3, sessionTypes:['Climbing'], focusMode:'weak', focusPick:'', focusOther:'', focusSecondary:'',
-    sessionStyle:'play', drillCategory:'', mobilityFocus:[] };
+    sessionStyle:'play', drillCategory:'', mobilityFocus:[], routineStyle:'' };
 }
 const MOBILITY_FOCUS_OPTIONS = ['Hips','Shoulders','Thoracic spine/back','Ankles/feet','Wrists','Full body'];
+const FINGERS_ROUTINE_OPTIONS = ['HIT System (max-strength)','Repeaters','Hangboard ladders','Coach\'s choice'];
 
 // ---- Cycle phase calculation ----
 function getCyclePhases(cycleType){
@@ -788,7 +789,17 @@ async function askClaude(feedback){
       "hangs with nothing else — and state plainly which week of the current phase this falls in (e.g. 'Week 2 of 3, " +
       "Max Strength & Power'), since that context should visibly shape the prescription. The HIT System (max-strength " +
       "hangboard protocol) is a legitimate option to recommend here when it fits the phase and their level — feel free " +
-      "to suggest it, not just repeaters. The " +
+      "to suggest it, not just repeaters.\n\n" +
+      "FORMAT REQUIREMENT, applies to every workout type: every list item must name a specific, real, " +
+      "individually-recognizable exercise or stretch someone could look up and do — e.g. 'Side plank hold' or " +
+      "'Reverse crunches', never a category label standing in for one. The muscle group, power level, core region, " +
+      "core movement type, and day type in their log are CONTEXT for deciding what to prescribe — never echo one of " +
+      "those labels as if it were the exercise itself (wrong: 'Obliques, static: side plank hold' — the actual " +
+      "exercise name got buried after a label prefix; right: 'Side plank hold (obliques, static), 30 sec/side'). " +
+      "Also get the anatomy right when you group or label things by body region — a hip/glute stretch like Figure-4 " +
+      "or pigeon pose is not an upper-body stretch, and mislabeling what a movement actually targets is a real " +
+      "mistake, not a minor detail. If you're unsure which region heading something belongs under, use a neutral " +
+      "heading instead of guessing wrong.\n\n" +
       "'Current pain status' line is the authoritative, most recent state — if it says None, do not dwell on older " +
       "pain mentions elsewhere in the log; if it says anything else, do not prescribe exercise for the affected area, " +
       "recommend rest and seeing a doctor or physical therapist instead, and only plan around unaffected areas if " +
@@ -806,7 +817,8 @@ async function askClaude(feedback){
       `Recent log, per calendar day with every field entered that day (most recent last):\n${recent}\n\n` +
       `Today:\n- Minutes available: ${d.minutes}\n- Feeling: ${FEELING_SCALE.find(f=>f.v===d.feeling).l} (${d.feeling}/5)\n` +
       `- Session type(s) wanted: ${d.sessionTypes.join(', ') || 'no preference'}\n- Priority focus: ${focusLine}\n` +
-      (d.mobilityFocus.length ? `- Mobility focus: ${d.mobilityFocus.join(', ')}\n` : '') + `\n` +
+      (d.mobilityFocus.length ? `- Mobility focus: ${d.mobilityFocus.join(', ')}\n` : '') +
+      (d.routineStyle ? `- Requested routine: ${d.routineStyle} — build the session around this specific routine.\n` : '') + `\n` +
       `Give today's plan.`;
 
     messages = [{ role:'user', content: userMsg }];
@@ -934,6 +946,7 @@ function renderToday(){
       <div><div class="phase-name">${escHtml(cycle.phaseName)}</div>
         <div class="small muted">Week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks} &middot; ${App.settings.cycleType}</div></div>
     </div>
+    <p class="small" style="margin-top:10px;">${escHtml(PHASE_GUIDANCE[cycle.phaseName] || '')}</p>
   </div>
   ${renderBriefingCard(App.entries)}
   ${banners}
@@ -952,6 +965,14 @@ function renderToday(){
     ${d.sessionTypes.includes('Mobility / Stretch') ? `
     <div class="field"><label>Mobility focus (optional)</label>
       ${pillsHTML(MOBILITY_FOCUS_OPTIONS, d.mobilityFocus, 'toggleMobilityFocus', {sm:true})}
+    </div>` : ''}
+    ${(d.sessionTypes.includes('Strength') || d.sessionTypes.includes('Antagonist / Stabilizer') || d.sessionTypes.includes('Core Workout')) ? `
+    <div class="field"><label>Routine (optional)</label>
+      ${pillsHTML(['Coach\'s choice'].concat(STRENGTH_LIKE_STYLES), d.routineStyle || 'Coach\'s choice', 'setRoutineStyle', {sm:true})}
+    </div>` : ''}
+    ${d.sessionTypes.includes('Fingers') ? `
+    <div class="field"><label>Fingers routine (optional)</label>
+      ${pillsHTML(FINGERS_ROUTINE_OPTIONS, d.routineStyle || "Coach's choice", 'setRoutineStyle', {sm:true})}
     </div>` : ''}
     ${d.sessionTypes.includes('Climbing') ? `
     <div class="field"><label>Climbing portion</label>
@@ -1267,8 +1288,9 @@ function renderQuestionnaire(){
 // ---- Event handlers (called from inline onclick in templates) ----
 function setAskFeeling(v){ App.ui.askDraft.feeling = Number(v); App.render(); }
 function toggleAskType(t){ const arr = App.ui.askDraft.sessionTypes; const i = arr.indexOf(t);
-  if (i>-1) arr.splice(i,1); else arr.push(t); App.render(); }
+  if (i>-1) arr.splice(i,1); else arr.push(t); App.ui.askDraft.routineStyle = ''; App.render(); }
 function toggleMobilityFocus(a){ toggleArr(App.ui.askDraft.mobilityFocus, a); App.render(); }
+function setRoutineStyle(v){ App.ui.askDraft.routineStyle = (v === 'Coach\'s choice') ? '' : v; App.render(); }
 function setFocusMode(label){
   App.ui.askDraft.focusMode = label.indexOf('weak')>-1 ? 'weak' : label.indexOf('Pick')>-1 ? 'pick' : 'other';
   App.render();
@@ -1476,3 +1498,4 @@ window.deleteEntry = deleteEntry; window.openPlanAsPage = openPlanAsPage; window
 window.savePlanToLog = savePlanToLog; window.searchExercise = searchExercise; window.setPlanAdherence = setPlanAdherence;
 window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
 window.sharePlan = sharePlan; window.toggleMobilityFocus = toggleMobilityFocus; window.toLocalISO = toLocalISO;
+window.setRoutineStyle = setRoutineStyle;
