@@ -36,25 +36,29 @@ const RADAR_AXES = [
 
 // Your own workout structures and exercise pool — used for logging (what did I do) and the
 // weekly-guidelines check-in. These are guidelines to notice drift on, not requirements to hit.
-const WORKOUT_STYLES = ['Core Circuit','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout','Stretch/Mobility','Cardio Circuit','Fingers','General/Other'];
+const WORKOUT_STYLES = ['Core Circuit','Leg Day','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout','Stretch/Mobility','Cardio Circuit','Fingers','General/Other'];
 const EXERCISE_LIBRARY = {
   'Core Circuit': ["Hanging leg lift","Oblique weighted arm dip","Sit-up to stand-up","Wheelbarrow","Oblique knee raise plank","Farmer walk","A-frame drop","Plank (elevated)","Plank (sideways walk)","Side plank with leg raise","Full-body focus plank","Kettlebell figure 8","Matrix lean back"],
+  'Leg Day': ["Squat/deadlift","Catcher calf raises","Calf jumps","High stepping","Weighted box jumps","Bulgarian lunges","Hanging knee lifts","Wall sits","Multidirectional lunges","Core-to-toe side lunges"],
   'Upper Tabata': ["Bent-over rows","Lat pulldowns","Bicep curls","Wrist curls"],
   'TRX — Core': ["Body saw","Side plank with hip raise","Overhead squat"],
   'TRX — Shoulder': ["Clock press","T-Y-I deltoid series","Atomic pushups","T-spine rotation"],
   'Full Efficient Workout': ["Mountain mans (rope/pulley alternating lockouts)","Campus board lunges","Around-the-world pull-ups","Offset pull-ups","Box jumps","One-leg squats","Lunges with shoulder press","Step-ups onto box","Tucks","Bridges","Side elbow planks","Dip-bar leg raises","Superman pushups","Bicep/tricep work","Chest/upper work","Forearm plank","Dolphin pushups","One-arm planks","Toe touches","Scissor kicks"],
   'Stretch/Mobility': ["Joint circles (ankles/hips/shoulders)","World's greatest stretch","Pigeon pose","Cat-cow + thread-the-needle","Hip flexor stretch","Hamstring stretch","Adductor stretch","Rotator cuff stretch","Chest/biceps doorway stretch","Thoracic spine rotation","Wrist mobility circles","Shoulder dislocates (band/stick)","Pec release (lacrosse ball)","90/90 hip switches"],
   'Cardio Circuit': ["Jump rope","Rowing intervals","Stair sprints","Suicide sprints","Incline treadmill walk","Bike intervals","Burpees"],
-  'Fingers': ["Finger hangs","Finger pull-ups","Finger planks","Hangboard repeaters","Minimum-edge hangs","Fingerboard moving hangs"],
+  'Fingers': ["Finger hangs","Finger pull-ups","Finger planks","Hangboard repeaters","Minimum-edge hangs","Fingerboard moving hangs","HIT System (max-strength hangs)","Wrist curls (health/prehab)","Finger extensions (rubber band)"],
   'General/Other': ["Hanging leg raises","Pistol squats","Raised-leg diamond pushups","Jumping lunges","Lateral pull-ups","Upside-down shoulder press","Tricep dips","Incline pushups","Chair ups","Stair jumps","Stair sprints","Front squats","Turkish getup","Straight-arm planks","Shoulder dislocates"],
 };
 // Which workout styles are worth surfacing for each session type — so picking "Cardio" doesn't
-// show you TRX options and picking "Fingers" doesn't show you Cardio Circuit.
+// show you TRX options and picking "Fingers" doesn't show you Cardio Circuit. Strength, Antagonist,
+// and Core Workout all share the same full routine set, since any of these named routines could
+// reasonably be logged under any of those three types.
+const STRENGTH_LIKE_STYLES = ['Core Circuit','Leg Day','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout'];
 const TYPE_RELEVANT_STYLES = {
-  'Antagonist / Stabilizer': ['TRX — Shoulder','Upper Tabata','General/Other'],
-  'Strength': ['Upper Tabata','Full Efficient Workout','General/Other'],
+  'Antagonist / Stabilizer': STRENGTH_LIKE_STYLES,
+  'Strength': STRENGTH_LIKE_STYLES,
+  'Core Workout': STRENGTH_LIKE_STYLES,
   'Cardio': ['Cardio Circuit','General/Other'],
-  'Core Workout': ['Core Circuit','TRX — Core','Full Efficient Workout'],
   'Mobility / Stretch': ['Stretch/Mobility'],
   'Fingers': ['Fingers'],
 };
@@ -246,16 +250,15 @@ function getCycleState(settings){
   if (daysSince < 0) daysSince = 0;
   const weekNum = Math.floor(daysSince / 7);
   const weekInCycle = weekNum % totalWeeks;
-  const cycleNumber = Math.floor(weekNum / totalWeeks) + 1;
   let acc = 0;
   for (const p of phases) {
     if (weekInCycle < acc + p.weeks) {
       return { phaseName: p.name, weekOfPhase: weekInCycle - acc + 1, phaseLengthWeeks: p.weeks,
-        cycleNumber, weekOfCycle: weekInCycle + 1, totalWeeksInCycle: totalWeeks };
+        weekOfCycle: weekInCycle + 1, totalWeeksInCycle: totalWeeks };
     }
     acc += p.weeks;
   }
-  return { phaseName: phases[0].name, weekOfPhase:1, phaseLengthWeeks: phases[0].weeks, cycleNumber, weekOfCycle:1, totalWeeksInCycle: totalWeeks };
+  return { phaseName: phases[0].name, weekOfPhase:1, phaseLengthWeeks: phases[0].weeks, weekOfCycle:1, totalWeeksInCycle: totalWeeks };
 }
 
 // Manually pin the current phase/week (e.g. "I just finished 3 weeks, doing a taper/project week now",
@@ -439,6 +442,16 @@ function detectPatterns(entries){
 
   if (last4ClimbDays.length === 4 && last4ClimbDays.every(d => d.intensities.includes('Max effort') || (d.intensities.length && d.intensities.every(i=>i==='Hard'||i==='Max effort')))) {
     flags.push("Your last 4 climbing days were all Hard/Max effort. Worth a lighter, skill- or mobility-focused day before stacking a 5th.");
+  }
+
+  // route-vs-boulder imbalance: last 6 climbing days tagged mostly Sport/Rope with none tagged Bouldering
+  const last6ClimbDays = climbDays.slice(0,6);
+  if (last6ClimbDays.length >= 5) {
+    const ropeTagged = last6ClimbDays.filter(d => d.entries.some(e => e.type==='Climbing' && arr(e.dayTypes).includes('Sport/Rope'))).length;
+    const boulderTagged = last6ClimbDays.filter(d => d.entries.some(e => e.type==='Climbing' && arr(e.dayTypes).includes('Bouldering'))).length;
+    if (ropeTagged >= last6ClimbDays.length - 1 && boulderTagged === 0) {
+      flags.push("Recent climbing has been almost all route/rope work with no bouldering — a MoonBoard or bouldering-focused session would round that out.");
+    }
   }
 
   const lastMobilityDay = days.find(d => d.timeMobility > 0);
@@ -791,13 +804,21 @@ async function askClaude(feedback){
       "something generic.\n\n" +
       "If a pattern flag or weekly-rhythm note is relevant, address it directly in the plan (e.g. slot in finger work " +
       "or antagonist work if it's been skipped, or flag that a rest day is overdue) and say briefly why — but weigh " +
-      "this against their bandwidth constraints; a missed guideline on a genuinely busy week is not an emergency. The " +
+      "this against their bandwidth constraints; a missed guideline on a genuinely busy week is not an emergency. " +
+      "If a route-vs-boulder imbalance flag is present, it's fine to suggest a MoonBoard or bouldering-focused " +
+      "session as the climbing portion — they're open to that when it's genuinely warranted, not just as a default. " +
+      "When 'Fingers' is among the requested session types: always include some finger/wrist/forearm health work " +
+      "(e.g. wrist curls, finger extensions, gentle mobility) alongside the actual strength work, never just max-effort " +
+      "hangs with nothing else — and state plainly which week of the current phase this falls in (e.g. 'Week 2 of 3, " +
+      "Max Strength & Power'), since that context should visibly shape the prescription. The HIT System (max-strength " +
+      "hangboard protocol) is a legitimate option to recommend here when it fits the phase and their level — feel free " +
+      "to suggest it, not just repeaters. The " +
       "'Current pain status' line is the authoritative, most recent state — if it says None, do not dwell on older " +
       "pain mentions elsewhere in the log; if it says anything else, do not prescribe exercise for the affected area, " +
       "recommend rest and seeing a doctor or physical therapist instead, and only plan around unaffected areas if " +
       "that still makes sense.";
 
-    const userMsg = `Cycle: ${App.settings.cycleType}, currently in "${cycle.phaseName}" (week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks}, cycle #${cycle.cycleNumber}).\n` +
+    const userMsg = `Cycle: ${App.settings.cycleType}, currently in "${cycle.phaseName}" (week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks}).\n` +
       `Phase guideline: ${guidance}\n` +
       `Indoor grade: ${App.settings.gradeIndoor || 'not set'} · Outdoor grade: ${App.settings.gradeOutdoor || 'not set'}\n` +
       `Current pain status (most recent entry): ${mostRecentPain}\n` +
@@ -935,7 +956,7 @@ function renderToday(){
   <div class="card">
     <div class="phase-banner">
       <div><div class="phase-name">${escHtml(cycle.phaseName)}</div>
-        <div class="small muted">Week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks} &middot; ${App.settings.cycleType} cycle #${cycle.cycleNumber}</div></div>
+        <div class="small muted">Week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks} &middot; ${App.settings.cycleType}</div></div>
     </div>
   </div>
   ${renderBriefingCard(App.entries)}
@@ -1119,24 +1140,6 @@ function renderHistory(){
     <div class="bar-track"><div class="bar-fill" style="width:${counts[a]/maxCount*100}%"></div></div>
     <div class="bar-val">${counts[a]}</div></div>`).join('');
 
-  // Broad category comparison: Climbing vs Drilling vs Exercise vs Cardio vs Core.
-  // A "drilling" day is a climbing day tagged Skills/Technique; a plain climbing day otherwise.
-  const broadCats = { Climbing:0, Drilling:0, Exercise:0, Cardio:0, Core:0 };
-  days.forEach(d => {
-    const climbingEntries = d.entries.filter(e => e.type === 'Climbing');
-    if (climbingEntries.length) {
-      if (climbingEntries.some(e => arr(e.dayTypes).includes('Skills/Technique'))) broadCats.Drilling++;
-      else broadCats.Climbing++;
-    }
-    if (d.timeStrength > 0 || d.timeAntag > 0) broadCats.Exercise++;
-    if (d.timeCardio > 0) broadCats.Cardio++;
-    if (d.timeCore > 0) broadCats.Core++;
-  });
-  const maxBroad = Math.max(1, ...Object.values(broadCats));
-  const dtBars = Object.keys(broadCats).map(a => `<div class="bar-row"><div class="bar-label">${a}</div>
-    <div class="bar-track"><div class="bar-fill" style="width:${broadCats[a]/maxBroad*100}%"></div></div>
-    <div class="bar-val">${broadCats[a]}</div></div>`).join('');
-
   // weekly balance radar + template comparison
   const radarData = computeWeeklyRadarData(entries);
   const tmpl = compareToWeeklyTemplate(entries);
@@ -1213,7 +1216,6 @@ function renderHistory(){
   <div class="card"><h2>Last 12 weeks</h2><div class="heatgrid">${heat}</div></div>
   <div class="card"><h2>Minutes, last 14 days</h2><div class="barlist">${minBars}</div></div>
   <div class="card"><h2>Focus area attention</h2><div class="barlist">${focusBars}</div></div>
-  <div class="card"><h2>Climbing vs. drilling vs. exercise vs. cardio vs. core</h2><div class="barlist">${dtBars}</div></div>
   <div class="card"><h2>Weak-point check-ins</h2>${assessRows}</div>
   <div class="card"><h2>Entries</h2>${entryRows}</div>`;
 }
