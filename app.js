@@ -503,44 +503,20 @@ function getWeakPointProfile(){
   return { categoryRank, leastWorked };
 }
 
-// Synthesizes recent climbing shortcomings and neglected training areas into one summary —
-// pure computation from data already tracked elsewhere, no API call needed.
+// Where you stand on your own weekly guidelines — completed vs. not, nothing else. Pure
+// computation from data already tracked elsewhere, no API call needed.
 function computeBriefing(entries){
   const guidelines = computeWeeklyGuidelines(entries);
-  const missedGuidelines = guidelines.filter(g => !g.ok).map(g => g.label);
-  const radar = computeWeeklyRadarData(entries);
-  const weakRadarAxes = radar.filter(r => r.pct < 40).map(r => r.axis);
-  const recentDays = dayList(entries).slice(0, 14);
-  const failureCounts = {};
-  recentDays.forEach(d => d.entries.forEach(e => arr(e.failurePoints).forEach(f => { failureCounts[f] = (failureCounts[f]||0) + 1; })));
-  const topFailures = Object.entries(failureCounts).filter(x=>x[1]>=2).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]);
-  const weak = getWeakPointProfile();
-  // Grades actually climbed recently — computable directly, unlike notes (free text, see below).
-  const recentClimbs = recentDays.flatMap(d => d.entries.flatMap(e => arr(e.climbs)));
-  const gradeCounts = {};
-  recentClimbs.forEach(c => { if (c.grade) gradeCounts[c.grade] = (gradeCounts[c.grade]||0) + (Number(c.count)||1); });
-  const topGrades = Object.entries(gradeCounts).sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>`${x[0]} (×${x[1]})`);
-  // Notes are free text — a local, non-AI computation can surface them but can't meaningfully
-  // "understand" them the way the generated plan (which goes through Claude) actually can.
-  const recentNotes = recentDays.flatMap(d => d.entries.filter(e=>e.notes).map(e => `${d.date}: "${e.notes}"`)).slice(-3);
-  return { missedGuidelines, weakRadarAxes, topFailures, leastWorked: weak.leastWorked, categoryRank: weak.categoryRank, topGrades, recentNotes };
+  return { completed: guidelines.filter(g => g.ok), notCompleted: guidelines.filter(g => !g.ok) };
 }
 function renderBriefingCard(entries){
   if (entries.length < 3) return ''; // not enough data yet to say anything meaningful
   const b = computeBriefing(entries);
-  const lines = [];
-  if (b.topGrades.length) lines.push(`Recent climbs: <b>${escHtml(b.topGrades.join(', '))}</b>.`);
-  if (b.topFailures.length) lines.push(`Recently breaking down on: <b>${escHtml(b.topFailures.join(', '))}</b>.`);
-  if (b.weakRadarAxes.length) lines.push(`Running light this week on: <b>${escHtml(b.weakRadarAxes.join(', '))}</b>.`);
-  if (b.missedGuidelines.length) lines.push(`Weekly guidelines not yet hit: <b>${escHtml(b.missedGuidelines.join(', '))}</b>.`);
-  if (b.leastWorked.length) lines.push(`Least-practiced focus areas lately: <b>${escHtml(b.leastWorked.join(', '))}</b>.`);
-  if (b.categoryRank) lines.push(`From your last weak-point check-in, weakest category: <b>${escHtml(b.categoryRank[0][0])}</b>.`);
-  if (!lines.length && !b.recentNotes.length) return `<div class="card"><h2>Training briefing</h2><p class="small muted">Nothing standing out right now — recent training looks reasonably balanced.</p></div>`;
   return `<div class="card">
     <h2>Training briefing</h2>
-    <p class="small muted">A quick synthesis of recent shortcomings and neglected areas — not a plan, just what to keep in mind.</p>
-    ${lines.map(l=>`<p class="small" style="margin:6px 0;">${l}</p>`).join('')}
-    ${b.recentNotes.length ? `<p class="small muted" style="margin-top:8px;">Your recent notes (shown as written — this briefing doesn't analyze free text, but the generated plan reads these too):</p>${b.recentNotes.map(n=>`<p class="small" style="margin:2px 0;">${escHtml(n)}</p>`).join('')}` : ''}
+    <p class="small muted">Where you stand on your weekly guidelines — not a plan, just a status check.</p>
+    ${b.completed.length ? `<p class="small" style="margin:6px 0;"><b style="color:var(--teal);">Completed this week:</b> ${escHtml(b.completed.map(g=>g.label).join(', '))}</p>` : ''}
+    ${b.notCompleted.length ? `<p class="small" style="margin:6px 0;"><b style="color:var(--gold);">Not yet this week:</b> ${escHtml(b.notCompleted.map(g=>g.label).join(', '))}</p>` : ''}
   </div>`;
 }
 
