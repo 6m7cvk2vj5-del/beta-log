@@ -9,7 +9,7 @@ const WALL_ANGLES = ['Overhang','Vertical','Slab','Roof'];
 const HOLD_TYPES = ['Crimps','Slopers','Pockets','Pinches','Jugs'];
 const FEELING_SCALE = [{v:1,l:'Flat'},{v:2,l:'Off'},{v:3,l:'Steady'},{v:4,l:'Strong'},{v:5,l:'Dialed'}];
 const INTENSITY_OPTIONS = ['Easy','Moderate','Hard','Max effort'];
-const SESSION_TYPE_OPTIONS = ['Climbing','Fingers','Antagonist / Stabilizer','Mobility / Stretch','Strength','Cardio','Core Workout'];
+const SESSION_TYPE_OPTIONS = ['Climbing','Fingers','Antagonist / Stabilizer','Flexibility / Stretch','Strength','Cardio','Core Workout'];
 const PAIN_OPTIONS = ['None','Mild, manageable','Recurring issue','Something new'];
 const ADHERENCE_OPTIONS = ['Followed exactly','Mostly followed','Modified a lot','Did something else entirely'];
 const DAY_TYPES = ['Indoor','Outdoor','Bouldering','Sport/Rope','Project','Power','Power-Endurance','Skills/Technique','Fun/Social'];
@@ -31,12 +31,12 @@ const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const WEEKLY_TARGETS = { climb:150, fingers:40, strength:40, antag:50, core:40, mobility:40, cardio:40 };
 const RADAR_AXES = [
   {key:'climb', label:'Climbing'}, {key:'fingers', label:'Fingers'}, {key:'strength', label:'Strength'},
-  {key:'antag', label:'Antagonist'}, {key:'core', label:'Core'}, {key:'mobility', label:'Mobility'}, {key:'cardio', label:'Cardio'},
+  {key:'antag', label:'Antagonist'}, {key:'core', label:'Core'}, {key:'mobility', label:'Flexibility'}, {key:'cardio', label:'Cardio'},
 ];
 
 // Your own workout structures and exercise pool — used for logging (what did I do) and the
 // weekly-guidelines check-in. These are guidelines to notice drift on, not requirements to hit.
-const WORKOUT_STYLES = ['Core Circuit','Leg Day','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout','Stretch/Mobility','Cardio Circuit','Fingers','General/Other'];
+const WORKOUT_STYLES = ['Core Circuit','Leg Day','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout','Stretch/Flexibility','Functional Movement','Cardio Circuit','Fingers','General/Other'];
 const EXERCISE_LIBRARY = {
   'Core Circuit': ["Hanging leg lift","Oblique weighted arm dip","Sit-up to stand-up","Wheelbarrow","Oblique knee raise plank","Farmer walk","A-frame drop","Plank (elevated)","Plank (sideways walk)","Side plank with leg raise","Full-body focus plank","Kettlebell figure 8","Matrix lean back"],
   'Leg Day': ["Squat/deadlift","Catcher calf raises","Calf jumps","High stepping","Weighted box jumps","Bulgarian lunges","Hanging knee lifts","Wall sits","Multidirectional lunges","Core-to-toe side lunges"],
@@ -44,7 +44,8 @@ const EXERCISE_LIBRARY = {
   'TRX — Core': ["Body saw","Side plank with hip raise","Overhead squat"],
   'TRX — Shoulder': ["Clock press","T-Y-I deltoid series","Atomic pushups","T-spine rotation"],
   'Full Efficient Workout': ["Mountain mans (rope/pulley alternating lockouts)","Campus board lunges","Around-the-world pull-ups","Offset pull-ups","Box jumps","One-leg squats","Lunges with shoulder press","Step-ups onto box","Tucks","Bridges","Side elbow planks","Dip-bar leg raises","Superman pushups","Bicep/tricep work","Chest/upper work","Forearm plank","Dolphin pushups","One-arm planks","Toe touches","Scissor kicks"],
-  'Stretch/Mobility': ["Joint circles (ankles/hips/shoulders)","World's greatest stretch","Pigeon pose","Cat-cow + thread-the-needle","Hip flexor stretch","Hamstring stretch","Adductor stretch","Rotator cuff stretch","Chest/biceps doorway stretch","Thoracic spine rotation","Wrist mobility circles","Shoulder dislocates (band/stick)","Pec release (lacrosse ball)","90/90 hip switches"],
+  'Stretch/Flexibility': ["Joint circles (ankles/hips/shoulders)","World's greatest stretch","Pigeon pose","Cat-cow + thread-the-needle","Hip flexor stretch","Hamstring stretch","Adductor stretch","Rotator cuff stretch","Chest/biceps doorway stretch","Thoracic spine rotation","Wrist mobility circles","Shoulder dislocates (band/stick)","Pec release (lacrosse ball)","90/90 hip switches","Standing quad stretch","Calf stretch (wall)","Frog stretch","Couch stretch (hip flexor)","Downward dog","Child's pose","Seated spinal twist","Scorpion stretch","Windmills","Neck rolls","Ankle dorsiflexion stretch","Butterfly stretch","Lat stretch (overhead reach)"],
+  'Functional Movement': ["Foam roll — IT band","Foam roll — quads/lats/thoracic spine","Foam roll — calves","Lacrosse ball — glutes/feet/pecs","Squat-to-stand","Inchworm to plank","Animal flow — bear crawl","Turkish get-up (bodyweight)","Loaded carry (farmer/suitcase)","Crawling patterns","World's greatest stretch (full combo)"],
   'Cardio Circuit': ["Jump rope","Rowing intervals","Stair sprints","Suicide sprints","Incline treadmill walk","Bike intervals","Burpees"],
   'Fingers': ["Finger hangs","Finger pull-ups","Finger planks","Hangboard repeaters","Minimum-edge hangs","Fingerboard moving hangs","HIT System (max-strength hangs)","Wrist curls (health/prehab)","Finger extensions (rubber band)"],
   'General/Other': ["Hanging leg raises","Pistol squats","Raised-leg diamond pushups","Jumping lunges","Lateral pull-ups","Upside-down shoulder press","Tricep dips","Incline pushups","Chair ups","Stair jumps","Stair sprints","Front squats","Turkish getup","Straight-arm planks","Shoulder dislocates"],
@@ -54,12 +55,16 @@ const EXERCISE_LIBRARY = {
 // and Core Workout all share the same full routine set, since any of these named routines could
 // reasonably be logged under any of those three types.
 const STRENGTH_LIKE_STYLES = ['Core Circuit','Leg Day','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout'];
+// When a chosen routine clearly implies a different bucket than the selected session type(s),
+// credit that bucket too when saving — the routine you actually did is more specific than the
+// type checkbox you picked to get there.
+const ROUTINE_IMPLIES_TYPE = { 'Core Circuit':'Core Workout', 'TRX — Core':'Core Workout' };
 const TYPE_RELEVANT_STYLES = {
   'Antagonist / Stabilizer': STRENGTH_LIKE_STYLES,
   'Strength': STRENGTH_LIKE_STYLES,
   'Core Workout': STRENGTH_LIKE_STYLES,
   'Cardio': ['Cardio Circuit','General/Other'],
-  'Mobility / Stretch': ['Stretch/Mobility'],
+  'Flexibility / Stretch': ['Stretch/Flexibility','Functional Movement'],
   'Fingers': ['Fingers'],
 };
 
@@ -188,7 +193,8 @@ const App = {
   lastPlan: null, // the most recently generated plan, persisted so it survives a reload/close
   ui: { tab:'today', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
         qDraft: {}, qOpen:false, expandedEntry:null, planLoading:false, planError:'', planText:'',
-        editingId:null, planFeedback:'', lastPlanContext:null, showAdherence:false, planAdherencePick:'' },
+        editingId:null, planFeedback:'', lastPlanContext:null, showAdherence:false, planAdherencePick:'',
+        importLoading:false, importError:'' },
 
   load() {
     try { const s = localStorage.getItem(LS.settings); if (s) this.settings = Object.assign(this.settings, JSON.parse(s)); } catch(e){}
@@ -201,6 +207,18 @@ const App = {
       delete this.settings.grade;
       this.saveSettings();
     }
+    // schema migration: "Mobility / Stretch" renamed to "Flexibility / Stretch", and its routine
+    // "Stretch/Mobility" renamed to "Stretch/Flexibility" — rename on existing entries so old data
+    // isn't orphaned under a type string nothing else in the app recognizes anymore.
+    let migratedEntries = false;
+    this.entries.forEach(e => {
+      if (e.type === 'Mobility / Stretch') { e.type = 'Flexibility / Stretch'; migratedEntries = true; }
+      if (Array.isArray(e.workoutStyles) && e.workoutStyles.includes('Stretch/Mobility')) {
+        e.workoutStyles = e.workoutStyles.map(s => s === 'Stretch/Mobility' ? 'Stretch/Flexibility' : s);
+        migratedEntries = true;
+      }
+    });
+    if (migratedEntries) this.saveEntries();
     this.applyFontSize();
   },
   applyFontSize() {
@@ -243,7 +261,7 @@ function freshLogDraft(){
 }
 function freshAskDraft(){
   return { minutes:60, feeling:3, sessionTypes:['Climbing'], focusMode:'weak', focusPick:'', focusOther:'', focusSecondary:'',
-    sessionStyle:'play', drillCategory:'', mobilityFocus:[], routineStyle:'' };
+    sessionStyle:'play', drillCategory:'', mobilityFocus:[], routineStyle:'', mentalFocus:false };
 }
 const MOBILITY_FOCUS_OPTIONS = ['Hips','Shoulders','Thoracic spine/back','Ankles/feet','Wrists','Full body'];
 const FINGERS_ROUTINE_OPTIONS = ['HIT System (max-strength)','Repeaters','Hangboard ladders','Coach\'s choice'];
@@ -334,8 +352,10 @@ function dayList(entries){
 function classifyDay(dayAgg){
   if (!dayAgg) return 'No entry';
   if (dayAgg.types.includes('Climbing')) return 'Climb';
-  if (dayAgg.types.includes('Rest') && dayAgg.types.length === 1) return 'Rest';
-  if (dayAgg.types.some(t => ['Antagonist / Stabilizer','Mobility / Stretch','Strength'].includes(t))) return 'Exercise';
+  // A day made up only of rest and/or flexibility/stretch counts as a rest day — that's active
+  // recovery, not training that should compete with the weekly template's rest slots.
+  if (dayAgg.types.every(t => t === 'Rest' || t === 'Flexibility / Stretch')) return 'Rest';
+  if (dayAgg.types.some(t => ['Antagonist / Stabilizer','Strength','Fingers','Cardio','Core Workout'].includes(t))) return 'Exercise';
   return 'Rest';
 }
 
@@ -647,36 +667,111 @@ function showLastPlan(){
   const box = document.querySelector('.plan-box');
   if (box && box.scrollIntoView) box.scrollIntoView({behavior:'smooth', block:'start'});
 }
-function savePlanToLog(){
-  const d = App.ui.askDraft;
-  const type = d.sessionTypes.includes('Climbing') ? 'Climbing' : (d.sessionTypes[0] || 'Strength');
-  const duration = Number(d.minutes) || 60;
-  const entry = Object.assign(freshLogDraft(), {
-    id: uid(), date: todayISO(), type, duration, feeling: d.feeling,
-    plan: App.ui.planText, planAdherence: App.ui.planAdherencePick,
-    notes: 'Logged from a generated plan.',
+// Shared with the "Add this to today's log" flow — same extraction, same validation, same schema,
+// whether the text came from an uploaded file or a Claude-generated plan.
+async function extractWorkoutData(text){
+  const key = (App.settings.apiKey||'').trim();
+  if (!key) throw new Error('Add your Anthropic API key in Settings first.');
+  if (!text || !text.trim()) throw new Error('There\u2019s no text to read.');
+
+  const schema = `{
+  "type": one of "Climbing","Fingers","Antagonist / Stabilizer","Flexibility / Stretch","Strength","Cardio","Core Workout","Rest",
+  "date": "YYYY-MM-DD" if a date is mentioned, else null,
+  "feeling": integer 1-5 if inferable from tone, else null,
+  "timeClimb": number, "timeFingers": number, "timeStrength": number, "timeAntag": number, "timeCore": number, "timeMobility": number, "timeCardio": number (minutes in each bucket that actually applies; 0 for the rest),
+  "intensity": one of "Easy","Moderate","Hard","Max effort", or null (climbing only),
+  "dayTypes": array from ["Indoor","Outdoor","Bouldering","Sport/Rope","Project","Power","Power-Endurance","Skills/Technique","Fun/Social"] (climbing only),
+  "climbs": array of {"grade":string, "count":number, "location":"Indoor" or "Outdoor"} (climbing only),
+  "muscleGroup": array from ["Upper body push","Upper body pull","Legs","Grip/forearms","Full body"] (strength/antagonist only),
+  "powerLevel": one of "Max strength/heavy","Power/explosive","Endurance/high-rep","Stability/control", or null,
+  "coreRegion": array from ["Upper abs","Lower abs","Obliques","Full core/anti-rotation"] (core only),
+  "coreMovementType": array from ["Static/isometric","Dynamic/crunches-type"] (core only),
+  "failurePoints": array from ["Grip/forearms gave out","Footwork broke down","Lost the sequence","Couldn't commit to the move","Got pumped","Couldn't reach the hold","Feet cut loose","Mental — backed off"] (climbing only),
+  "notes": short free-text summary of anything real in the source that doesn't fit the fields above
+}`;
+  const sys = "You extract structured climbing-training data from free text into a fixed JSON schema. " +
+    "Respond with ONLY the JSON object — no markdown fences, no preamble, no commentary. Use null, an empty " +
+    "array, or 0 for anything not actually present in the text — never invent or guess at data that isn't there. " +
+    "Schema:\n" + schema;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers: { 'Content-Type':'application/json', 'x-api-key': key, 'anthropic-version':'2023-06-01',
+               'anthropic-dangerous-direct-browser-access':'true' },
+    body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:800, system: sys,
+      messages:[{role:'user', content: 'Text to extract from:\n\n' + text.slice(0, 8000)}] }),
   });
-  if (type !== 'Climbing') {
-    // Same defensive zeroing as submitLog() — a non-climbing entry shouldn't carry freshLogDraft()'s
-    // climbing-field defaults (that's the bug that made mobility sessions log zero mobility time).
-    entry.timeClimb = 0; entry.intensity = ''; entry.dayTypes = []; entry.focus = [];
-    entry.wallAngle = []; entry.holdTypes = []; entry.failurePoints = []; entry.failurePointsOther = ''; entry.climbs = [];
-  } else {
-    entry.timeClimb = duration;
-  }
-  const bucket = TYPE_TO_TIME_FIELD[type];
-  if (bucket) entry[bucket] = duration;
-  if (TYPE_TO_WORKOUT_STYLE[type]) entry.workoutStyles = [TYPE_TO_WORKOUT_STYLE[type]];
-  // Always a new entry — never merge into whatever else happens to be logged today already.
-  App.entries.push(entry);
-  App.entries.sort((a,b)=> a.date.localeCompare(b.date));
-  App.saveEntries();
-  App.ui.showAdherence = false; App.ui.planAdherencePick = '';
-  App.toast('Added to today\u2019s log');
-  App.render();
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || 'API error');
+  const raw = (data.content||[]).map(b=>b.text||'').join('\n').trim();
+  const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+  const parsed = JSON.parse(cleaned);
+
+  // Build a fresh draft and only apply fields that actually validate against the app's own option
+  // lists — the model's output is a starting point for you to review, never trusted blindly.
+  const fresh = freshLogDraft();
+  const validTypes = SESSION_TYPE_OPTIONS.concat(['Rest']);
+  fresh.type = validTypes.includes(parsed.type) ? parsed.type : 'Strength';
+  fresh.date = (typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date)) ? parsed.date : todayISO();
+  fresh.feeling = [1,2,3,4,5].includes(Number(parsed.feeling)) ? Number(parsed.feeling) : 3;
+  TIME_FIELDS.forEach(f => { fresh[f] = Number(parsed[f]) || 0; });
+  if (INTENSITY_OPTIONS.includes(parsed.intensity)) fresh.intensity = parsed.intensity;
+  fresh.dayTypes = arr(parsed.dayTypes).filter(t => DAY_TYPES.includes(t));
+  fresh.muscleGroup = arr(parsed.muscleGroup).filter(t => MUSCLE_GROUPS.includes(t));
+  if (POWER_LEVELS.includes(parsed.powerLevel)) fresh.powerLevel = parsed.powerLevel;
+  fresh.coreRegion = arr(parsed.coreRegion).filter(t => CORE_REGIONS.includes(t));
+  fresh.coreMovementType = arr(parsed.coreMovementType).filter(t => CORE_MOVEMENT_TYPES.includes(t));
+  fresh.failurePoints = arr(parsed.failurePoints).filter(t => FAILURE_POINT_OPTIONS.includes(t));
+  fresh.notes = typeof parsed.notes === 'string' ? parsed.notes.slice(0, 2000) : '';
+  if (TYPE_TO_WORKOUT_STYLE[fresh.type]) fresh.workoutStyles = [TYPE_TO_WORKOUT_STYLE[fresh.type]];
+  fresh.duration = TIME_FIELDS.reduce((sum,f)=> sum + (Number(fresh[f])||0), 0);
+
+  const climbsDraft = arr(parsed.climbs).filter(c => c && c.grade).map(c => ({
+    grade: String(c.grade).slice(0,20), count: Number(c.count)||1,
+    location: (c.location === 'Indoor' || c.location === 'Outdoor') ? c.location : 'Indoor',
+  }));
+  return { fresh, climbsDraft };
 }
 
-// ---- Claude API call ----
+// "Add this to today's log" — runs the plan text through the same extraction as a file import,
+// then drops you on the Log tab to review and adjust before it actually saves.
+async function saveGeneratedPlanToLog(){
+  App.ui.importLoading = true; App.ui.importError = ''; App.render();
+  try {
+    const { fresh, climbsDraft } = await extractWorkoutData(App.ui.planText);
+    fresh.plan = App.ui.planText;
+    fresh.planAdherence = App.ui.planAdherencePick;
+    App.ui.logDraft = fresh;
+    App.ui.climbsDraft = climbsDraft;
+    App.ui.editingId = null;
+    App.ui.showAdherence = false; App.ui.planAdherencePick = '';
+    App.toast('Extracted — review and save');
+    App.setTab('log');
+  } catch(e) {
+    App.ui.importError = 'Could not process the plan: ' + e.message;
+    App.render();
+  } finally {
+    App.ui.importLoading = false;
+  }
+}
+
+async function importWorkoutFile(file){
+  if (!file) return;
+  App.ui.importLoading = true; App.ui.importError = ''; App.render();
+  try {
+    const text = await file.text();
+    const { fresh, climbsDraft } = await extractWorkoutData(text);
+    App.ui.logDraft = fresh;
+    App.ui.climbsDraft = climbsDraft;
+    App.ui.editingId = null;
+    App.toast('Extracted — review and save');
+  } catch(e) {
+    App.ui.importError = 'Could not read that file: ' + e.message;
+  } finally {
+    App.ui.importLoading = false; App.render();
+  }
+}
+
 async function askClaude(feedback){
   const key = (App.settings.apiKey||'').trim();
   if (!key) { App.ui.planError = 'Add your Anthropic API key in Settings first.'; App.render(); return; }
@@ -742,6 +837,7 @@ async function askClaude(feedback){
     const guidelineLine = guidelines.filter(g=>!g.ok).map(g=>g.label).join(', ') || 'all on track this week';
     // Weak-point profile is always sent as background, independent of which priority-focus mode
     // is selected — it shouldn't disappear just because you picked a specific focus area instead.
+    const mentalIsWeakest = !!(weak.categoryRank && weak.categoryRank[0][0] === 'mental');
     const weakPointLine = weak.categoryRank
       ? `Weakest category from self-assessment: ${weak.categoryRank[0][0]} (avg ${weak.categoryRank[0][1].toFixed(1)}/5). Least-worked focus areas in the log: ${weak.leastWorked.join(', ')}.`
       : 'No weak-point check-in taken yet.';
@@ -790,9 +886,22 @@ async function askClaude(feedback){
       "the wall — general movement prep to get the body ready (joint circles, activation drills, light dynamic " +
       "stretching — not on-wall climbing), (2) light easy climbing as a second warmup phase, (3) the main climbing " +
       "volume, (4) some near-limit/limit climbing, (5) climbing-related strength or power exercise, " +
-      "(6) cooldown/stabilizer work. Never drop a piece, but vary the AMOUNT of each — how much climbing, how much " +
-      "antagonist/stabilizer, how much cardio — based on the phase, time budget, and the patterns/weekly-rhythm notes " +
-      "below. Design climbing portions around 4-8 move problems or route laps with real rest between attempts — never " +
+      "(6) a light health circuit covering fingers, wrists, shoulders, forearms, and hips, (7) cooldown/stabilizer " +
+      "work. Never drop a piece, but vary the AMOUNT of each — how much climbing, how much antagonist/stabilizer, " +
+      "how much cardio — based on the phase, time budget, and the patterns/weekly-rhythm notes below. The finger " +
+      "and forearm portion of that health circuit is NEVER optional and never gets cut for time, even on a short " +
+      "session — climbing is finger/forearm-dominant, and skipping this is exactly how those get overdeveloped and " +
+      "chronically stressed relative to everything opposing them; a couple of minutes of finger extensions or wrist " +
+      "mobility is enough on a tight day, but it must be there. Also include a brief mental-game component every " +
+      "climbing session by default — a specific visualization cue, a note on committing to a move instead of " +
+      "hesitating — a sentence or two is enough, it doesn't need its own time block. ESCALATE this to a real, " +
+      "dedicated mental-work block with actual time allotted (not just a line) whenever either is true: they've " +
+      "explicitly requested a mental-heavy session today, or their self-assessment flags mental as the weakest " +
+      "category — in either case build in deliberate practice (extended visualization before an attempt, " +
+      "purposely working a move that triggers hesitation, a pre-climb routine, working through a specific fear " +
+      "like a big move or an exposed position) as a real part of the session, not an aside. Design climbing " +
+      "portions around 4-8 move problems or route laps with " +
+      "real rest between attempts — never " +
       "a single move drilled to exhaustion, and never just 20 minutes projecting one hard climb. When Climbing is not " +
       "requested, still shape the session as warmup → main work → cooldown using only the requested modalities — " +
       "build a real mobility/general-movement session where relevant, not just a stretch list — center it on the " +
@@ -837,8 +946,10 @@ async function askClaude(feedback){
       `Recent log, per calendar day with every field entered that day (most recent last):\n${recent}\n\n` +
       `Today:\n- Minutes available: ${d.minutes}\n- Feeling: ${FEELING_SCALE.find(f=>f.v===d.feeling).l} (${d.feeling}/5)\n` +
       `- Session type(s) wanted: ${d.sessionTypes.join(', ') || 'no preference'}\n- Priority focus: ${focusLine}\n` +
-      (d.mobilityFocus.length ? `- Mobility focus: ${d.mobilityFocus.join(', ')}\n` : '') +
-      (d.routineStyle ? `- Requested routine: ${d.routineStyle} — build the session around this specific routine.\n` : '') + `\n` +
+      (d.mobilityFocus.length ? `- Flexibility focus: ${d.mobilityFocus.join(', ')}\n` : '') +
+      (d.routineStyle ? `- Requested routine: ${d.routineStyle} — build the session around this specific routine.\n` : '') +
+      (d.mentalFocus ? `- Explicitly requested a mental-heavy session today.\n` : '') +
+      (mentalIsWeakest ? `- Mental is the weakest category from their self-assessment.\n` : '') + `\n` +
       `Give today's plan.`;
 
     messages = [{ role:'user', content: userMsg }];
@@ -987,8 +1098,8 @@ function renderToday(){
     <div class="field"><label>Session type(s) wanted</label>
       ${pillsHTML(SESSION_TYPE_OPTIONS, d.sessionTypes, 'toggleAskType')}
     </div>
-    ${d.sessionTypes.includes('Mobility / Stretch') ? `
-    <div class="field"><label>Mobility focus (optional)</label>
+    ${d.sessionTypes.includes('Flexibility / Stretch') ? `
+    <div class="field"><label>Flexibility focus (optional)</label>
       ${pillsHTML(MOBILITY_FOCUS_OPTIONS, d.mobilityFocus, 'toggleMobilityFocus', {sm:true})}
     </div>` : ''}
     ${(d.sessionTypes.includes('Strength') || d.sessionTypes.includes('Antagonist / Stabilizer') || d.sessionTypes.includes('Core Workout')) ? `
@@ -1006,6 +1117,9 @@ function renderToday(){
         <p class="small muted" style="margin-bottom:6px;">Optional: narrow it down. I'll name a specific drill from Training for Climbing or Climb to Fitness so you can look it up in your copy.</p>
         ${pillsHTML(['Technique','Fingers','Power','Power-Endurance','Endurance','Strength','Core','Legs','Injury Prevention','Mobility'], d.drillCategory, 'setDrillCategory', {sm:true})}
       </div>` : ''}
+      <div style="margin-top:8px;">
+        ${pillsHTML(['Make this mental-focused'], d.mentalFocus ? 'Make this mental-focused' : '', 'toggleMentalFocus', {sm:true})}
+      </div>
     </div>` : ''}
     <div class="field"><label>Priority focus</label>
       ${pillsHTML(['Auto (weak points)', 'Pick a focus area', 'Describe something else'],
@@ -1033,7 +1147,9 @@ function renderToday(){
     ${App.ui.showAdherence ? `<div class="field" style="margin-top:10px;">
       <label>If you already did it (or partly did it) — how close did you end up sticking to this?</label>
       ${pillsHTML(ADHERENCE_OPTIONS, App.ui.planAdherencePick, 'setPlanAdherence', {sm:true})}
-      <button class="btn btn-secondary" style="margin-top:8px;" onclick="savePlanToLog()" ${App.ui.planAdherencePick ? '' : 'disabled'}>Save to today's entry</button>
+      <button class="btn btn-secondary" style="margin-top:8px;" onclick="saveGeneratedPlanToLog()" ${(App.ui.planAdherencePick && !App.ui.importLoading) ? '' : 'disabled'}>${App.ui.importLoading ? 'Reading the plan…' : "Save to today's entry"}</button>
+      <p class="small muted" style="margin-top:6px;">Reads the actual plan text — same extraction as importing a file — so you land on the Log tab with everything filled in to review before it saves.</p>
+      ${App.ui.importError ? `<p class="small" style="color:var(--red);margin-top:6px;">${escHtml(App.ui.importError)}</p>` : ''}
     </div>` : ''}
     <div class="field" style="margin-top:12px;">
       <label>Want to adjust this?</label>
@@ -1060,6 +1176,13 @@ function renderLog(){
   const isCore = d.type === 'Core Workout';
   const editing = !!App.ui.editingId;
   return `
+  ${!editing ? `<div class="card">
+    <h2>Import from a file</h2>
+    <p class="small muted">Upload a text file (notes from elsewhere, an export, whatever you've got) and Claude will read it and fill in the form below — you review and adjust before saving, nothing saves automatically.</p>
+    <input type="file" id="importWorkoutFile" accept=".txt,.md,.csv,text/plain" onchange="importWorkoutFile(this.files[0])">
+    ${App.ui.importLoading ? `<p class="small muted" style="margin-top:8px;">Reading it…</p>` : ''}
+    ${App.ui.importError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.importError)}</p>` : ''}
+  </div>` : ''}
   <div class="card">
     ${editing ? `<div class="banner info">Editing an existing entry. <button class="btn btn-ghost" style="width:auto;padding:6px 12px;margin-left:8px;" onclick="cancelEdit()">Cancel edit</button></div>` : ''}
     <h2>${editing ? 'Edit entry' : 'Log a session'}</h2>
@@ -1333,6 +1456,7 @@ function setFocusSecondary(area){
 }
 function setSessionStyle(v){ App.ui.askDraft.sessionStyle = v==='Give me a drill' ? 'drill' : 'play'; App.render(); }
 function setDrillCategory(c){ App.ui.askDraft.drillCategory = App.ui.askDraft.drillCategory === c ? '' : c; App.render(); }
+function toggleMentalFocus(){ App.ui.askDraft.mentalFocus = !App.ui.askDraft.mentalFocus; App.render(); }
 
 function setLogFeeling(v){ App.ui.logDraft.feeling = Number(v); App.render(); }
 function setLogIntensity(v){ App.ui.logDraft.intensity = v; App.render(); }
@@ -1407,10 +1531,10 @@ function importData(file){
 
 
 const TYPE_TO_TIME_FIELD = {
-  'Antagonist / Stabilizer': 'timeAntag', 'Mobility / Stretch': 'timeMobility', 'Strength': 'timeStrength', 'Cardio': 'timeCardio',
+  'Antagonist / Stabilizer': 'timeAntag', 'Flexibility / Stretch': 'timeMobility', 'Strength': 'timeStrength', 'Cardio': 'timeCardio',
   'Core Workout': 'timeCore', 'Fingers': 'timeFingers',
 };
-const TYPE_TO_WORKOUT_STYLE = { 'Core Workout': 'Core Circuit', 'Mobility / Stretch': 'Stretch/Mobility', 'Fingers': 'Fingers' };
+const TYPE_TO_WORKOUT_STYLE = { 'Core Workout': 'Core Circuit', 'Flexibility / Stretch': 'Stretch/Flexibility', 'Fingers': 'Fingers' };
 function editEntry(id){
   const e = App.entries.find(x => x.id === id);
   if (!e) return;
@@ -1528,8 +1652,10 @@ window.applyPhaseOverride = applyPhaseOverride; window.exportData = exportData; 
 window.clearPainFlag = clearPainFlag; window.editEntry = editEntry; window.cancelEdit = cancelEdit;
 window.toggleLogWorkoutStyle = toggleLogWorkoutStyle; window.toggleLogExercise = toggleLogExercise;
 window.deleteEntry = deleteEntry; window.openPlanAsPage = openPlanAsPage; window.savePlanAsImage = savePlanAsImage;
-window.savePlanToLog = savePlanToLog; window.searchExercise = searchExercise; window.setPlanAdherence = setPlanAdherence;
+window.saveGeneratedPlanToLog = saveGeneratedPlanToLog; window.searchExercise = searchExercise; window.setPlanAdherence = setPlanAdherence;
 window.showLastPlan = showLastPlan;
 window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
+window.toggleMentalFocus = toggleMentalFocus;
 window.sharePlan = sharePlan; window.toggleMobilityFocus = toggleMobilityFocus; window.toLocalISO = toLocalISO;
 window.setRoutineStyle = setRoutineStyle;
+window.importWorkoutFile = importWorkoutFile;
