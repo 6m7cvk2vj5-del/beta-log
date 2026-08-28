@@ -9,7 +9,7 @@ const WALL_ANGLES = ['Overhang','Vertical','Slab','Roof'];
 const HOLD_TYPES = ['Crimps','Slopers','Pockets','Pinches','Jugs'];
 const FEELING_SCALE = [{v:1,l:'Flat'},{v:2,l:'Off'},{v:3,l:'Steady'},{v:4,l:'Strong'},{v:5,l:'Dialed'}];
 const INTENSITY_OPTIONS = ['Easy','Moderate','Hard','Max effort'];
-const SESSION_TYPE_OPTIONS = ['Climbing','Fingers','Antagonist / Stabilizer','Flexibility / Stretch','Strength','Cardio','Core Workout'];
+const SESSION_TYPE_OPTIONS = ['Climbing','Fingers','Antagonist / Stabilizer','Flexibility / Stretch','Mobility','Strength','Cardio','Core Workout'];
 const PAIN_OPTIONS = ['None','Mild, manageable','Recurring issue','Something new'];
 const ADHERENCE_OPTIONS = ['Followed exactly','Mostly followed','Modified a lot','Did something else entirely'];
 const DAY_TYPES = ['Indoor','Outdoor','Bouldering','Sport/Rope','Project','Power','Power-Endurance','Skills/Technique','Fun/Social'];
@@ -27,16 +27,22 @@ const WEEKLY_TEMPLATE = ['Rest','Climb','Exercise','Climb','Rest','Climb','Climb
 const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
 // Rough weekly minute targets used only to scale the radar chart — adjustable, not gospel.
-// Axes match the loggable session types exactly (legs live inside Strength/Antagonist now).
-const WEEKLY_TARGETS = { climb:150, fingers:40, strength:40, antag:50, core:40, mobility:40, cardio:40 };
+// Axes match the loggable session types exactly.
+const WEEKLY_TARGETS = { climb:150, fingers:40, strength:40, antag:50, core:40, flexibility:30, mobility:30, cardio:40 };
 const RADAR_AXES = [
   {key:'climb', label:'Climbing'}, {key:'fingers', label:'Fingers'}, {key:'strength', label:'Strength'},
-  {key:'antag', label:'Antagonist'}, {key:'core', label:'Core'}, {key:'mobility', label:'Flexibility'}, {key:'cardio', label:'Cardio'},
+  {key:'antag', label:'Antagonist'}, {key:'core', label:'Core'}, {key:'flexibility', label:'Flexibility'},
+  {key:'mobility', label:'Mobility'}, {key:'cardio', label:'Cardio'},
 ];
 
 // Your own workout structures and exercise pool — used for logging (what did I do) and the
 // weekly-guidelines check-in. These are guidelines to notice drift on, not requirements to hit.
-const WORKOUT_STYLES = ['Core Circuit','Leg Day','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout','Stretch/Flexibility','Functional Movement','Cardio Circuit','Fingers','General/Other'];
+// Flexibility/Stretch (pure static flexibility — yoga, stretching) and Mobility (fascia release,
+// rolling out, body prep, functional movement) are kept as separate banks on purpose, per style —
+// each named entry below doubles as a filter when picking exercises to log.
+const WORKOUT_STYLES = ['Core Circuit','Leg Day','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout',
+  'Yoga Poses','Static Stretch','Foam Rolling','Lacrosse Ball Release','Functional Movement','Body Prep',
+  'Cardio Circuit','Fingers','General/Other'];
 const EXERCISE_LIBRARY = {
   'Core Circuit': ["Hanging leg lift","Oblique weighted arm dip","Sit-up to stand-up","Wheelbarrow","Oblique knee raise plank","Farmer walk","A-frame drop","Plank (elevated)","Plank (sideways walk)","Side plank with leg raise","Full-body focus plank","Kettlebell figure 8","Matrix lean back"],
   'Leg Day': ["Squat/deadlift","Catcher calf raises","Calf jumps","High stepping","Weighted box jumps","Bulgarian lunges","Hanging knee lifts","Wall sits","Multidirectional lunges","Core-to-toe side lunges"],
@@ -44,8 +50,12 @@ const EXERCISE_LIBRARY = {
   'TRX — Core': ["Body saw","Side plank with hip raise","Overhead squat"],
   'TRX — Shoulder': ["Clock press","T-Y-I deltoid series","Atomic pushups","T-spine rotation"],
   'Full Efficient Workout': ["Mountain mans (rope/pulley alternating lockouts)","Campus board lunges","Around-the-world pull-ups","Offset pull-ups","Box jumps","One-leg squats","Lunges with shoulder press","Step-ups onto box","Tucks","Bridges","Side elbow planks","Dip-bar leg raises","Superman pushups","Bicep/tricep work","Chest/upper work","Forearm plank","Dolphin pushups","One-arm planks","Toe touches","Scissor kicks"],
-  'Stretch/Flexibility': ["Joint circles (ankles/hips/shoulders)","World's greatest stretch","Pigeon pose","Cat-cow + thread-the-needle","Hip flexor stretch","Hamstring stretch","Adductor stretch","Rotator cuff stretch","Chest/biceps doorway stretch","Thoracic spine rotation","Wrist mobility circles","Shoulder dislocates (band/stick)","Pec release (lacrosse ball)","90/90 hip switches","Standing quad stretch","Calf stretch (wall)","Frog stretch","Couch stretch (hip flexor)","Downward dog","Child's pose","Seated spinal twist","Scorpion stretch","Windmills","Neck rolls","Ankle dorsiflexion stretch","Butterfly stretch","Lat stretch (overhead reach)"],
-  'Functional Movement': ["Foam roll — IT band","Foam roll — quads/lats/thoracic spine","Foam roll — calves","Lacrosse ball — glutes/feet/pecs","Squat-to-stand","Inchworm to plank","Animal flow — bear crawl","Turkish get-up (bodyweight)","Loaded carry (farmer/suitcase)","Crawling patterns","World's greatest stretch (full combo)"],
+  'Yoga Poses': ["Downward dog","Child's pose","Pigeon pose","Warrior I","Warrior II","Triangle pose","Cat-cow","Cobra pose","Seated forward fold","Low lunge","Reclined spinal twist","Happy baby pose","Bridge pose","Thread-the-needle"],
+  'Static Stretch': ["Hip flexor stretch","Hamstring stretch","Adductor stretch","Rotator cuff stretch","Chest/biceps doorway stretch","Thoracic spine rotation","Wrist mobility circles","Shoulder dislocates (band/stick)","90/90 hip switches","Standing quad stretch","Calf stretch (wall)","Couch stretch (hip flexor)","Butterfly stretch","Lat stretch (overhead reach)","Ankle dorsiflexion stretch","Seated spinal twist","Neck rolls","Frog stretch"],
+  'Foam Rolling': ["Foam roll — IT band","Foam roll — quads","Foam roll — lats","Foam roll — thoracic spine","Foam roll — calves","Foam roll — glutes","Foam roll — upper back"],
+  'Lacrosse Ball Release': ["Lacrosse ball — glutes","Lacrosse ball — feet/plantar fascia","Lacrosse ball — pecs","Lacrosse ball — forearms","Lacrosse ball — traps/upper back"],
+  'Functional Movement': ["Squat-to-stand","Inchworm to plank","Animal flow — bear crawl","Turkish get-up (bodyweight)","Loaded carry (farmer/suitcase)","Crawling patterns","World's greatest stretch (full combo)","Windmills","Scorpion stretch"],
+  'Body Prep': ["Joint circles (ankles/hips/shoulders)","Arm circles","Leg swings (front-back)","Leg swings (side-side)","Hip circles","Walking lunges with twist","High knees march","Band pull-aparts","Wall slides"],
   'Cardio Circuit': ["Jump rope","Rowing intervals","Stair sprints","Suicide sprints","Incline treadmill walk","Bike intervals","Burpees"],
   'Fingers': ["Finger hangs","Finger pull-ups","Finger planks","Hangboard repeaters","Minimum-edge hangs","Fingerboard moving hangs","HIT System (max-strength hangs)","Wrist curls (health/prehab)","Finger extensions (rubber band)"],
   'General/Other': ["Hanging leg raises","Pistol squats","Raised-leg diamond pushups","Jumping lunges","Lateral pull-ups","Upside-down shoulder press","Tricep dips","Incline pushups","Chair ups","Stair jumps","Stair sprints","Front squats","Turkish getup","Straight-arm planks","Shoulder dislocates"],
@@ -64,7 +74,8 @@ const TYPE_RELEVANT_STYLES = {
   'Strength': STRENGTH_LIKE_STYLES,
   'Core Workout': STRENGTH_LIKE_STYLES,
   'Cardio': ['Cardio Circuit','General/Other'],
-  'Flexibility / Stretch': ['Stretch/Flexibility','Functional Movement'],
+  'Flexibility / Stretch': ['Yoga Poses','Static Stretch'],
+  'Mobility': ['Foam Rolling','Lacrosse Ball Release','Functional Movement','Body Prep'],
   'Fingers': ['Fingers'],
 };
 
@@ -194,7 +205,8 @@ const App = {
   ui: { tab:'today', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
         qDraft: {}, qOpen:false, expandedEntry:null, planLoading:false, planError:'', planText:'',
         editingId:null, planFeedback:'', lastPlanContext:null, showAdherence:false, planAdherencePick:'',
-        importLoading:false, importError:'' },
+        importLoading:false, importError:'', infoPopup:null,
+        timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null } },
 
   load() {
     try { const s = localStorage.getItem(LS.settings); if (s) this.settings = Object.assign(this.settings, JSON.parse(s)); } catch(e){}
@@ -255,7 +267,7 @@ function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(
 function freshLogDraft(){
   return { date: todayISO(), type:'Climbing', duration:0, feeling:3, intensity:'Moderate',
     dayTypes:[], dayTypesOther:'', focus:[], wallAngle:[], holdTypes:[],
-    timeClimb:0, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeMobility:0, timeCardio:0,
+    timeClimb:0, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeFlexibility:0, timeMobility:0, timeCardio:0,
     workoutStyles:[], exercisesDone:[], muscleGroup:[], powerLevel:'', coreRegion:[], coreMovementType:[],
     failurePoints:[], failurePointsOther:'', pain:'None', notes:'', plan:'', planAdherence:'' };
 }
@@ -324,7 +336,7 @@ function aggregateByDay(entries){
   const byDate = {};
   entries.forEach(e => {
     const d = byDate[e.date] || {
-      date: e.date, totalMinutes: 0, timeClimb:0, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeMobility:0, timeCardio:0,
+      date: e.date, totalMinutes: 0, timeClimb:0, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeFlexibility:0, timeMobility:0, timeCardio:0,
       types: [], dayTypes: [], focus: [], intensities: [], pain: 'None', entries: [],
     };
     d.totalMinutes += Number(e.duration) || 0;
@@ -333,6 +345,7 @@ function aggregateByDay(entries){
     d.timeStrength += Number(e.timeStrength) || 0;
     d.timeAntag += Number(e.timeAntag) || 0;
     d.timeCore += Number(e.timeCore) || 0;
+    d.timeFlexibility += Number(e.timeFlexibility) || 0;
     d.timeMobility += Number(e.timeMobility) || 0;
     d.timeCardio += Number(e.timeCardio) || 0;
     if (!d.types.includes(e.type)) d.types.push(e.type);
@@ -352,9 +365,9 @@ function dayList(entries){
 function classifyDay(dayAgg){
   if (!dayAgg) return 'No entry';
   if (dayAgg.types.includes('Climbing')) return 'Climb';
-  // A day made up only of rest and/or flexibility/stretch counts as a rest day — that's active
-  // recovery, not training that should compete with the weekly template's rest slots.
-  if (dayAgg.types.every(t => t === 'Rest' || t === 'Flexibility / Stretch')) return 'Rest';
+  // A day made up only of rest, flexibility/stretch, and/or mobility work counts as a rest day —
+  // that's active recovery, not training that should compete with the weekly template's rest slots.
+  if (dayAgg.types.every(t => t === 'Rest' || t === 'Flexibility / Stretch' || t === 'Mobility')) return 'Rest';
   if (dayAgg.types.some(t => ['Antagonist / Stabilizer','Strength','Fingers','Cardio','Core Workout'].includes(t))) return 'Exercise';
   return 'Rest';
 }
@@ -395,7 +408,7 @@ function computeWeeklyRadarData(entries){
     const daysAgo = Math.round((new Date(todayISO()) - new Date(d.date)) / 86400000);
     return daysAgo >= 0 && daysAgo < 7;
   });
-  const sums = { climb:0, fingers:0, strength:0, antag:0, core:0, mobility:0, cardio:0 };
+  const sums = { climb:0, fingers:0, strength:0, antag:0, core:0, flexibility:0, mobility:0, cardio:0 };
   days.forEach(d => { Object.keys(sums).forEach(k => { sums[k] += d['time'+k[0].toUpperCase()+k.slice(1)] || 0; }); });
   return RADAR_AXES.map(a => ({ axis: a.label, pct: Math.min(150, Math.round((sums[a.key] / WEEKLY_TARGETS[a.key]) * 100)) }));
 }
@@ -546,8 +559,7 @@ function renderBriefingCard(entries){
   if (entries.length < 3) return ''; // not enough data yet to say anything meaningful
   const b = computeBriefing(entries);
   return `<div class="card">
-    <h2>Training briefing</h2>
-    <p class="small muted">Where you stand on your weekly guidelines — not a plan, just a status check.</p>
+    <h2>Training briefing${infoIcon('Where you stand on your weekly guidelines — not a plan, just a status check.')}</h2>
     ${b.completed.length ? `<p class="small" style="margin:6px 0;"><b style="color:var(--teal);">Completed this week:</b> ${escHtml(b.completed.map(g=>g.label).join(', '))}</p>` : ''}
     ${b.notCompleted.length ? `<p class="small" style="margin:6px 0;"><b style="color:var(--gold);">Not yet this week:</b> ${escHtml(b.notCompleted.map(g=>g.label).join(', '))}</p>` : ''}
   </div>`;
@@ -745,13 +757,13 @@ async function saveGeneratedPlanToLog(){
     App.ui.climbsDraft = climbsDraft;
     App.ui.editingId = null;
     App.ui.showAdherence = false; App.ui.planAdherencePick = '';
+    App.ui.importLoading = false; // clear before switching tabs, or the new tab renders stuck "loading"
     App.toast('Extracted — review and save');
     App.setTab('log');
   } catch(e) {
     App.ui.importError = 'Could not process the plan: ' + e.message;
-    App.render();
-  } finally {
     App.ui.importLoading = false;
+    App.render();
   }
 }
 
@@ -770,6 +782,17 @@ async function importWorkoutFile(file){
   } finally {
     App.ui.importLoading = false; App.render();
   }
+}
+
+// Gathers the named exercises actually relevant to what's being asked for, so the plan can be told
+// to draw from them — otherwise the model has no idea this bank exists and just invents its own,
+// which is why curated exercises were never actually getting suggested.
+function relevantExerciseBankText(sessionTypes, routineStyle){
+  const styles = new Set();
+  if (routineStyle && EXERCISE_LIBRARY[routineStyle]) styles.add(routineStyle);
+  sessionTypes.forEach(t => { (TYPE_RELEVANT_STYLES[t]||[]).forEach(s => styles.add(s)); });
+  const lines = [...styles].filter(s => EXERCISE_LIBRARY[s]).map(s => `${s}: ${EXERCISE_LIBRARY[s].join(', ')}`);
+  return lines.join('\n');
 }
 
 async function askClaude(feedback){
@@ -929,6 +952,13 @@ async function askClaude(feedback){
       "or pigeon pose is not an upper-body stretch, and mislabeling what a movement actually targets is a real " +
       "mistake, not a minor detail. If you're unsure which region heading something belongs under, use a neutral " +
       "heading instead of guessing wrong.\n\n" +
+      "When a named exercise bank is provided below, treat it as your primary source — most of what you " +
+      "prescribe should be pulled directly from it by name, since that's what they can actually tap-select " +
+      "afterward when logging. It's fine to introduce one new item outside the bank if it genuinely fits better, " +
+      "but don't reach outside it by default. Keep the session THEMED and consistent — if it's a core session, " +
+      "stay core-focused throughout rather than wandering across unrelated categories; a single deliberate new " +
+      "block (e.g. one drill or one stretch style not in their usual rotation) is good for variety, scattering " +
+      "many unrelated things across one session is not.\n\n" +
       "'Current pain status' line is the authoritative, most recent state — if it says None, do not dwell on older " +
       "pain mentions elsewhere in the log; if it says anything else, do not prescribe exercise for the affected area, " +
       "recommend rest and seeing a doctor or physical therapist instead, and only plan around unaffected areas if " +
@@ -950,6 +980,7 @@ async function askClaude(feedback){
       (d.routineStyle ? `- Requested routine: ${d.routineStyle} — build the session around this specific routine.\n` : '') +
       (d.mentalFocus ? `- Explicitly requested a mental-heavy session today.\n` : '') +
       (mentalIsWeakest ? `- Mental is the weakest category from their self-assessment.\n` : '') + `\n` +
+      (relevantExerciseBankText(d.sessionTypes, d.routineStyle) ? `Their own named exercise bank for today's relevant routines (see FORMAT REQUIREMENT below):\n${relevantExerciseBankText(d.sessionTypes, d.routineStyle)}\n\n` : '') +
       `Give today's plan.`;
 
     messages = [{ role:'user', content: userMsg }];
@@ -1040,12 +1071,108 @@ function linkifyPlanToHTML(text){
 App.render = function(){
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === App.ui.tab));
   const panel = document.getElementById('panels');
-  if (App.ui.qOpen) { panel.innerHTML = renderQuestionnaire(); return; }
-  if (App.ui.tab === 'today') panel.innerHTML = renderToday();
+  if (App.ui.qOpen) { panel.innerHTML = renderQuestionnaire(); }
+  else if (App.ui.tab === 'today') panel.innerHTML = renderToday();
   else if (App.ui.tab === 'log') panel.innerHTML = renderLog();
   else if (App.ui.tab === 'history') panel.innerHTML = renderHistory();
   else panel.innerHTML = renderSettings();
+  document.getElementById('infoOverlay').innerHTML = App.ui.infoPopup
+    ? `<div class="info-overlay" onclick="if(event.target===this) closeInfo()">
+        <div class="info-popup"><button class="close-x" onclick="closeInfo()">&times;</button><p>${escHtml(App.ui.infoPopup)}</p></div>
+      </div>`
+    : '';
 };
+function infoIcon(text){ return `<button type="button" class="info-icon" onclick="event.stopPropagation(); showInfo('${escAttr(text)}')">i</button>`; }
+function showInfo(text){ App.ui.infoPopup = text; App.render(); }
+function closeInfo(){ App.ui.infoPopup = null; App.render(); }
+
+// ---- Countdown timer for circuits — a fixed dial at the bottom of Today, keeps running across
+// tabs (the interval doesn't care what's on screen), only the widget itself is Today-only.
+const TIMER_PRESETS = [15, 30, 45, 60, 90];
+function renderTimerWidget(){
+  const t = App.ui.timer;
+  const r = 24, circumference = 2 * Math.PI * r;
+  const frac = t.totalSeconds > 0 ? t.remainingSeconds / t.totalSeconds : 0;
+  const offset = circumference * (1 - frac);
+  const mm = Math.floor(t.remainingSeconds / 60), ss = t.remainingSeconds % 60;
+  const timeStr = `${mm}:${String(ss).padStart(2,'0')}`;
+  return `<div class="timer-spacer"></div>
+  <div class="timer-bar">
+    <svg width="56" height="56" viewBox="0 0 56 56" style="flex:none;">
+      <circle cx="28" cy="28" r="${r}" fill="none" stroke="var(--border)" stroke-width="4"/>
+      <circle id="timerRing" cx="28" cy="28" r="${r}" fill="none" stroke="${t.remainingSeconds===0?'var(--red)':'var(--gold)'}" stroke-width="4"
+        stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" stroke-linecap="round" transform="rotate(-90 28 28)" style="transition:stroke-dashoffset 1s linear;"/>
+      <text id="timerNum" x="28" y="32" text-anchor="middle" font-size="13" fill="var(--text)" font-family="'IBM Plex Sans',sans-serif">${timeStr}</text>
+    </svg>
+    <div class="timer-presets">
+      ${TIMER_PRESETS.map(s=>`<button class="pill sm${t.totalSeconds===s?' active':''}" onclick="setTimerPreset(${s})">${s}s</button>`).join('')}
+    </div>
+    <button class="btn btn-primary" style="width:auto;padding:9px 16px;flex:none;" id="timerToggleBtn" onclick="toggleTimer()">${t.running ? 'Pause' : (t.remainingSeconds < t.totalSeconds && t.remainingSeconds > 0 ? 'Resume' : 'Start')}</button>
+    <button class="btn btn-ghost" style="width:auto;padding:9px 12px;flex:none;" onclick="resetTimer()">Reset</button>
+  </div>`;
+}
+function setTimerPreset(seconds){
+  pauseTimerInterval();
+  App.ui.timer.totalSeconds = seconds;
+  App.ui.timer.remainingSeconds = seconds;
+  App.ui.timer.running = false;
+  App.render();
+}
+function pauseTimerInterval(){
+  if (App.ui.timer.intervalId) { clearInterval(App.ui.timer.intervalId); App.ui.timer.intervalId = null; }
+}
+function toggleTimer(){
+  const t = App.ui.timer;
+  if (t.running) { pauseTimerInterval(); t.running = false; App.render(); return; }
+  if (t.remainingSeconds <= 0) { t.remainingSeconds = t.totalSeconds; }
+  t.running = true;
+  t.intervalId = setInterval(tickTimer, 1000);
+  App.render();
+}
+function resetTimer(){
+  pauseTimerInterval();
+  App.ui.timer.remainingSeconds = App.ui.timer.totalSeconds;
+  App.ui.timer.running = false;
+  App.render();
+}
+function tickTimer(){
+  const t = App.ui.timer;
+  t.remainingSeconds = Math.max(0, t.remainingSeconds - 1);
+  // Direct DOM update, not a full App.render() — avoids interrupting typing or an open popup
+  // elsewhere, and the widget only exists in the DOM at all when Today is the active tab.
+  const ring = document.getElementById('timerRing');
+  const num = document.getElementById('timerNum');
+  if (ring && num) {
+    const r = 24, circumference = 2 * Math.PI * r;
+    const frac = t.totalSeconds > 0 ? t.remainingSeconds / t.totalSeconds : 0;
+    ring.setAttribute('stroke-dashoffset', circumference * (1 - frac));
+    const mm = Math.floor(t.remainingSeconds / 60), ss = t.remainingSeconds % 60;
+    num.textContent = `${mm}:${String(ss).padStart(2,'0')}`;
+    if (t.remainingSeconds === 0) ring.setAttribute('stroke', 'var(--red)');
+  }
+  if (t.remainingSeconds === 0) {
+    pauseTimerInterval();
+    t.running = false;
+    playTimerBeep();
+    if (navigator.vibrate) navigator.vibrate([200,100,200]);
+    const btn = document.getElementById('timerToggleBtn');
+    if (btn) btn.textContent = 'Start';
+  }
+}
+function playTimerBeep(){
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.25, 0.5].forEach(delay => {
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.2, ctx.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.2);
+      osc.start(ctx.currentTime + delay);
+      osc.stop(ctx.currentTime + delay + 0.2);
+    });
+  } catch(e) { /* audio not available — the vibration + visual change still happened */ }
+}
 
 function renderToday(){
   if (!App.settings.cycleStartDate) {
@@ -1088,8 +1215,9 @@ function renderToday(){
       ${App.lastPlan ? `<button class="btn btn-ghost" style="width:auto;padding:6px 12px;" onclick="showLastPlan()">See most recent workout</button>` : ''}
     </div>
     ${App.lastPlan ? `<p class="small muted" style="margin:8px 0 0;">Last generated ${new Date(App.lastPlan.generatedAt).toLocaleString()}${App.lastPlan.sessionTypes.length ? ' — ' + App.lastPlan.sessionTypes.join(', ') : ''}.</p>` : ''}
-    <div class="field" style="margin-top:14px;"><label>Minutes available</label>
-      <input type="number" min="5" max="240" value="${d.minutes}" oninput="App.ui.askDraft.minutes=this.value">
+    <div class="field" style="margin-top:14px;"><label>Minutes available: <b id="slider_askMinutes_val">${d.minutes}</b> min</label>
+      <input type="range" min="10" max="180" step="5" value="${d.minutes}"
+        oninput="App.ui.askDraft.minutes=Number(this.value); document.getElementById('slider_askMinutes_val').textContent=this.value;">
     </div>
     <div class="field"><label>How you're feeling</label>
       ${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setAskFeeling')}
@@ -1098,8 +1226,8 @@ function renderToday(){
     <div class="field"><label>Session type(s) wanted</label>
       ${pillsHTML(SESSION_TYPE_OPTIONS, d.sessionTypes, 'toggleAskType')}
     </div>
-    ${d.sessionTypes.includes('Flexibility / Stretch') ? `
-    <div class="field"><label>Flexibility focus (optional)</label>
+    ${(d.sessionTypes.includes('Flexibility / Stretch') || d.sessionTypes.includes('Mobility')) ? `
+    <div class="field"><label>Focus area (optional)</label>
       ${pillsHTML(MOBILITY_FOCUS_OPTIONS, d.mobilityFocus, 'toggleMobilityFocus', {sm:true})}
     </div>` : ''}
     ${(d.sessionTypes.includes('Strength') || d.sessionTypes.includes('Antagonist / Stabilizer') || d.sessionTypes.includes('Core Workout')) ? `
@@ -1114,8 +1242,8 @@ function renderToday(){
     <div class="field"><label>Climbing portion</label>
       ${pillsHTML(['Just play/climb', 'Give me a drill'], d.sessionStyle==='drill' ? 'Give me a drill' : 'Just play/climb', 'setSessionStyle', {sm:true})}
       ${d.sessionStyle==='drill' ? `<div style="margin-top:8px;">
-        <p class="small muted" style="margin-bottom:6px;">Optional: narrow it down. I'll name a specific drill from Training for Climbing or Climb to Fitness so you can look it up in your copy.</p>
         ${pillsHTML(['Technique','Fingers','Power','Power-Endurance','Endurance','Strength','Core','Legs','Injury Prevention','Mobility'], d.drillCategory, 'setDrillCategory', {sm:true})}
+        <p class="small muted" style="margin-top:6px;">${infoIcon("Optional: narrow it down. I'll name a specific drill from Training for Climbing or Climb to Fitness so you can look it up in your copy.")} What's this?</p>
       </div>` : ''}
       <div style="margin-top:8px;">
         ${pillsHTML(['Make this mental-focused'], d.mentalFocus ? 'Make this mental-focused' : '', 'toggleMentalFocus', {sm:true})}
@@ -1135,20 +1263,19 @@ function renderToday(){
     <button class="btn btn-primary" onclick="askClaude()" ${App.ui.planLoading?'disabled':''}>${App.ui.planLoading ? 'Thinking…' : "Get today's plan"}</button>
     ${App.ui.planError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.planError)}</p>` : ''}
     ${App.ui.planText ? `<div class="plan-box">${renderPlanWithSearchLinks(App.ui.planText)}</div>
-    <p class="small muted" style="margin-top:6px;">Tap any exercise name to search it.</p>
+    
     <div class="pillrow" style="margin-top:10px;">
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="sharePlan()">Share / copy text</button>
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="openPlanAsPage()">Open as page (tap-to-search)</button>
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="savePlanAsImage()">Save as image</button>
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="App.ui.showAdherence = !App.ui.showAdherence; App.render();">Add this to today's log</button>
     </div>
-    <p class="small muted" style="margin-top:6px;">"Share / copy text" is the fastest way into Notes, Messages, email, anywhere — on iPhone it opens the share sheet; elsewhere it copies to your clipboard.</p>
-    <p class="small muted" style="margin-top:6px;">Heads up: the image export is a flat picture — links only work in "Open as page."</p>
+    <p class="small muted" style="margin-top:6px;">Export options ${infoIcon('Share / copy text is the fastest way into Notes, Messages, email, anywhere — on iPhone it opens the share sheet; elsewhere it copies to your clipboard. Tap any exercise name above to search it. Heads up: the image export is a flat picture — links only work in Open as page.')}</p>
     ${App.ui.showAdherence ? `<div class="field" style="margin-top:10px;">
       <label>If you already did it (or partly did it) — how close did you end up sticking to this?</label>
       ${pillsHTML(ADHERENCE_OPTIONS, App.ui.planAdherencePick, 'setPlanAdherence', {sm:true})}
       <button class="btn btn-secondary" style="margin-top:8px;" onclick="saveGeneratedPlanToLog()" ${(App.ui.planAdherencePick && !App.ui.importLoading) ? '' : 'disabled'}>${App.ui.importLoading ? 'Reading the plan…' : "Save to today's entry"}</button>
-      <p class="small muted" style="margin-top:6px;">Reads the actual plan text — same extraction as importing a file — so you land on the Log tab with everything filled in to review before it saves.</p>
+      
       ${App.ui.importError ? `<p class="small" style="color:var(--red);margin-top:6px;">${escHtml(App.ui.importError)}</p>` : ''}
     </div>` : ''}
     <div class="field" style="margin-top:12px;">
@@ -1156,7 +1283,8 @@ function renderToday(){
       <textarea placeholder="e.g. swap the finger work for more core, I only actually have 30 min, less bouldering today..." oninput="App.ui.planFeedback=this.value; document.getElementById('regenBtn').disabled = !this.value.trim();">${escHtml(App.ui.planFeedback)}</textarea>
       <button id="regenBtn" class="btn btn-secondary" style="margin-top:8px;" onclick="askClaude(App.ui.planFeedback)" ${App.ui.planLoading || !App.ui.planFeedback.trim() ? 'disabled' : ''}>${App.ui.planLoading ? 'Thinking…' : 'Regenerate with this feedback'}</button>
     </div>` : ''}
-  </div>`;
+  </div>
+  ${renderTimerWidget()}`;
 }
 
 function sliderRow(label, field, value, max){
@@ -1177,8 +1305,7 @@ function renderLog(){
   const editing = !!App.ui.editingId;
   return `
   ${!editing ? `<div class="card">
-    <h2>Import from a file</h2>
-    <p class="small muted">Upload a text file (notes from elsewhere, an export, whatever you've got) and Claude will read it and fill in the form below — you review and adjust before saving, nothing saves automatically.</p>
+    <h2>Import from a file${infoIcon("Upload a text file (notes from elsewhere, an export, whatever you've got) and Claude will read it and fill in the form below — you review and adjust before saving, nothing saves automatically.")}</h2>
     <input type="file" id="importWorkoutFile" accept=".txt,.md,.csv,text/plain" onchange="importWorkoutFile(this.files[0])">
     ${App.ui.importLoading ? `<p class="small muted" style="margin-top:8px;">Reading it…</p>` : ''}
     ${App.ui.importError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.importError)}</p>` : ''}
@@ -1227,13 +1354,13 @@ function renderLog(){
       ${d.workoutStyles.map(style => `<div class="small muted" style="margin:8px 0 4px;">${escHtml(style)}</div>${pillsHTML(EXERCISE_LIBRARY[style]||[], d.exercisesDone, 'toggleLogExercise', {sm:true})}`).join('')}
     </div>` : ''}
     `}
-    <h3>Time spent</h3>
-    <p class="small muted">Total time for the entry is just the sum of these — no separate total to keep in sync. Log stretching, mobility, or antagonist work as their own entry on the same date if you did them separately; the app combines same-day entries into one day, it won't count as extra days.</p>
+    <h3>Time spent${infoIcon("Total time for the entry is just the sum of these — no separate total to keep in sync. Log stretching, mobility, or antagonist work as their own entry on the same date if you did them separately; the app combines same-day entries into one day, it won't count as extra days.")}</h3>
     ${isClimbing ? sliderRow('Climbing', 'timeClimb', d.timeClimb, 180) : ''}
     ${sliderRow('Finger strength', 'timeFingers', d.timeFingers)}
     ${sliderRow('Strength', 'timeStrength', d.timeStrength)}
     ${sliderRow('Antagonist/stabilizer', 'timeAntag', d.timeAntag)}
     ${sliderRow('Core', 'timeCore', d.timeCore)}
+    ${sliderRow('Flexibility', 'timeFlexibility', d.timeFlexibility)}
     ${sliderRow('Mobility', 'timeMobility', d.timeMobility)}
     ${sliderRow('Cardio', 'timeCardio', d.timeCardio)}
     ${isClimbing ? `
@@ -1343,18 +1470,15 @@ function renderHistory(){
     </div>
   </div>
   <div class="card">
-    <h2>Weekly balance</h2>
-    <p class="small muted">Trailing 7 days vs. rough weekly targets. Dashed ring = target; gold = you.</p>
+    <h2>Weekly balance${infoIcon('Trailing 7 days vs. rough weekly targets. Dashed ring = target; gold = you.')}</h2>
     <div style="display:flex;justify-content:center;">${renderRadarSVG(radarData)}</div>
   </div>
   <div class="card">
-    <h2>Your weekly guidelines</h2>
-    <p class="small muted">These are things to touch base on, not requirements — a check mark just means it's happened this week; a dash isn't a failure, especially on a full week.</p>
+    <h2>Your weekly guidelines${infoIcon("These are things to touch base on, not requirements — a check mark just means it's happened this week; a dash isn't a failure, especially on a full week.")}</h2>
     <div class="barlist">${guidelineRows}</div>
   </div>
   <div class="card">
-    <h2>This week vs. your usual rhythm</h2>
-    <p class="small muted">Reference: Mon rest &middot; Tue climb &middot; Wed exercise &middot; Thu climb &middot; Fri rest &middot; Sat/Sun climb.</p>
+    <h2>This week vs. your usual rhythm${infoIcon('Reference rhythm: Mon rest, Tue climb, Wed exercise, Thu climb, Fri rest, Sat/Sun climb.')}</h2>
     <div class="barlist">${tmplRow}</div>
     ${tmpl.notes.length ? `<p class="small" style="margin-top:10px;color:var(--red);">${tmpl.notes.join(' ')}</p>` : `<p class="small muted" style="margin-top:10px;">Tracking the usual rhythm so far this week.</p>`}
   </div>
@@ -1393,8 +1517,7 @@ function renderSettings(){
     </div>
   </div>
   <div class="card">
-    <h2>Jump to a phase/week</h2>
-    <p class="small muted">For an unplanned taper/project week, a missed week, or jumping partway into any phase — this resets the cycle math so today lands exactly where you say.</p>
+    <h2>Jump to a phase/week${infoIcon('For an unplanned taper/project week, a missed week, or jumping partway into any phase — this resets the cycle math so today lands exactly where you say.')}</h2>
     <div class="row2">
       <div class="field"><label>Phase</label>
         <select id="overridePhase">${getCyclePhases(s.cycleType).map(p=>`<option value="${escAttr(p.name)}">${p.name} (${p.weeks}wk)</option>`).join('')}</select>
@@ -1406,14 +1529,12 @@ function renderSettings(){
     <button class="btn btn-ghost" onclick="applyPhaseOverride()">Set as current</button>
   </div>
   <div class="card">
-    <h2>Export / import your data</h2>
-    <p class="small muted">Export downloads a JSON file of your entries and check-ins (API key excluded). Import reads one back in and merges it with what's already here — nothing gets overwritten, so it's safe to import an old backup after switching phones.</p>
+    <h2>Export / import your data${infoIcon("Export downloads a JSON file of your entries and check-ins (API key excluded). Import reads one back in and merges it with what's already here — nothing gets overwritten, so it's safe to import an old backup after switching phones.")}</h2>
     <button class="btn btn-ghost" onclick="exportData()">Export data (.json)</button>
     <input type="file" id="importFile" accept="application/json" style="margin-top:8px;" onchange="importData(this.files[0])">
   </div>
   <div class="card">
-    <h2>Anthropic API key</h2>
-    <p class="small muted">Stored only in this browser's local storage. Never written into this app's code, never sent anywhere but Anthropic's API.</p>
+    <h2>Anthropic API key${infoIcon("Stored only in this browser's local storage. Never written into this app's code, never sent anywhere but Anthropic's API.")}</h2>
     <div class="field"><input type="password" placeholder="sk-ant-..." value="${escHtml(s.apiKey)}" oninput="App.settings.apiKey=this.value"></div>
   </div>
   <button class="btn btn-primary" onclick="saveSettingsForm()">Save settings</button>`;
@@ -1433,7 +1554,7 @@ function renderQuestionnaire(){
       <h2>Weak-point check-in</h2>
       <button class="close-x" onclick="closeQuestionnaire()">&times;</button>
     </div>
-    <p class="small muted">0 = almost always happens, 5 = never happens. Answer honestly, not aspirationally. ${answered}/${QUESTIONS.length} answered.</p>
+    <p class="small muted">${answered}/${QUESTIONS.length} answered. ${infoIcon('0 = almost always happens, 5 = never happens. Answer honestly, not aspirationally.')}</p>
     ${items}
     <button class="btn btn-primary" onclick="submitAssessment()" ${answered<QUESTIONS.length?'disabled':''}>Submit (${answered}/${QUESTIONS.length})</button>
   </div>`;
@@ -1531,10 +1652,10 @@ function importData(file){
 
 
 const TYPE_TO_TIME_FIELD = {
-  'Antagonist / Stabilizer': 'timeAntag', 'Flexibility / Stretch': 'timeMobility', 'Strength': 'timeStrength', 'Cardio': 'timeCardio',
-  'Core Workout': 'timeCore', 'Fingers': 'timeFingers',
+  'Antagonist / Stabilizer': 'timeAntag', 'Flexibility / Stretch': 'timeFlexibility', 'Mobility': 'timeMobility',
+  'Strength': 'timeStrength', 'Cardio': 'timeCardio', 'Core Workout': 'timeCore', 'Fingers': 'timeFingers',
 };
-const TYPE_TO_WORKOUT_STYLE = { 'Core Workout': 'Core Circuit', 'Flexibility / Stretch': 'Stretch/Flexibility', 'Fingers': 'Fingers' };
+const TYPE_TO_WORKOUT_STYLE = { 'Core Workout': 'Core Circuit', 'Fingers': 'Fingers' };
 function editEntry(id){
   const e = App.entries.find(x => x.id === id);
   if (!e) return;
@@ -1563,7 +1684,7 @@ function cancelEdit(){
   App.ui.climbsDraft = [];
   App.render();
 }
-const TIME_FIELDS = ['timeClimb','timeFingers','timeStrength','timeAntag','timeCore','timeMobility','timeCardio'];
+const TIME_FIELDS = ['timeClimb','timeFingers','timeStrength','timeAntag','timeCore','timeFlexibility','timeMobility','timeCardio'];
 function submitLog(){
   const d = App.ui.logDraft;
   const entry = Object.assign({}, d, { id: App.ui.editingId || uid(), climbs: App.ui.climbsDraft.slice() });
@@ -1634,6 +1755,8 @@ App.render();
 
 // Explicit global exposure (belt-and-suspenders for inline onclick handlers across environments)
 window.App = App;
+window.showInfo = showInfo; window.closeInfo = closeInfo;
+window.setTimerPreset = setTimerPreset; window.toggleTimer = toggleTimer; window.resetTimer = resetTimer;
 window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
 window.EXERCISE_LIBRARY = EXERCISE_LIBRARY; window.WORKOUT_STYLES = WORKOUT_STYLES;
 window.FOCUS_AREAS = FOCUS_AREAS; window.ADHERENCE_OPTIONS = ADHERENCE_OPTIONS;
