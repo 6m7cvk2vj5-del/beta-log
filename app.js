@@ -178,12 +178,14 @@ const LS = {
   settings: 't4c_settings',
   entries: 't4c_entries',
   assessments: 't4c_assessments',
+  lastPlan: 't4c_last_plan',
 };
 
 const App = {
-  settings: { apiKey:'', cycleType:'3-2-1', cycleStartDate: todayISO(), gradeIndoor:'', gradeOutdoor:'' },
+  settings: { apiKey:'', cycleType:'3-2-1', cycleStartDate: todayISO(), gradeIndoor:'', gradeOutdoor:'', fontSize:'medium' },
   entries: [],
   assessments: [],
+  lastPlan: null, // the most recently generated plan, persisted so it survives a reload/close
   ui: { tab:'today', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
         qDraft: {}, qOpen:false, expandedEntry:null, planLoading:false, planError:'', planText:'',
         editingId:null, planFeedback:'', lastPlanContext:null, showAdherence:false, planAdherencePick:'' },
@@ -192,16 +194,26 @@ const App = {
     try { const s = localStorage.getItem(LS.settings); if (s) this.settings = Object.assign(this.settings, JSON.parse(s)); } catch(e){}
     try { const e = localStorage.getItem(LS.entries); if (e) this.entries = JSON.parse(e); } catch(e){}
     try { const a = localStorage.getItem(LS.assessments); if (a) this.assessments = JSON.parse(a); } catch(e){}
+    try { const p = localStorage.getItem(LS.lastPlan); if (p) this.lastPlan = JSON.parse(p); } catch(e){}
     // schema migration: old single "grade" field -> gradeIndoor
     if (this.settings.grade && !this.settings.gradeIndoor) {
       this.settings.gradeIndoor = this.settings.grade;
       delete this.settings.grade;
       this.saveSettings();
     }
+    this.applyFontSize();
+  },
+  applyFontSize() {
+    const px = { small: 14, medium: 16, large: 19 }[this.settings.fontSize] || 16;
+    document.documentElement.style.fontSize = px + 'px';
   },
   saveSettings() { localStorage.setItem(LS.settings, JSON.stringify(this.settings)); },
   saveEntries() { localStorage.setItem(LS.entries, JSON.stringify(this.entries)); },
   saveAssessments() { localStorage.setItem(LS.assessments, JSON.stringify(this.assessments)); },
+  saveLastPlan(text, sessionTypes) {
+    this.lastPlan = { text, generatedAt: new Date().toISOString(), sessionTypes: sessionTypes || [] };
+    try { localStorage.setItem(LS.lastPlan, JSON.stringify(this.lastPlan)); } catch(e){}
+  },
 
   toast(msg) {
     const t = document.getElementById('toast');
@@ -627,6 +639,14 @@ function savePlanAsImage(){
 }
 const COLORS_JS = { bg:'#17161B', gold:'#CC9B3C', text:'#EEE9E1' };
 function setPlanAdherence(v){ App.ui.planAdherencePick = v; App.render(); }
+function showLastPlan(){
+  if (!App.lastPlan) return;
+  App.ui.planText = App.lastPlan.text;
+  App.ui.planError = '';
+  App.render();
+  const box = document.querySelector('.plan-box');
+  if (box && box.scrollIntoView) box.scrollIntoView({behavior:'smooth', block:'start'});
+}
 function savePlanToLog(){
   const d = App.ui.askDraft;
   const type = d.sessionTypes.includes('Climbing') ? 'Climbing' : (d.sessionTypes[0] || 'Strength');
@@ -837,6 +857,7 @@ async function askClaude(feedback){
     const text = (data.content||[]).map(b=>b.text||'').join('\n').trim();
     App.ui.planText = text || 'No response came back — try again.';
     App.ui.planFeedback = '';
+    if (text) App.saveLastPlan(text, App.ui.askDraft.sessionTypes);
   } catch(e) {
     App.ui.planError = 'Could not reach Claude: ' + e.message;
   } finally {
@@ -951,8 +972,12 @@ function renderToday(){
   ${renderBriefingCard(App.entries)}
   ${banners}
   <div class="card">
-    <h2>Ask for today's plan</h2>
-    <div class="field"><label>Minutes available</label>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h2 style="margin-bottom:0;">Ask for today's plan</h2>
+      ${App.lastPlan ? `<button class="btn btn-ghost" style="width:auto;padding:6px 12px;" onclick="showLastPlan()">See most recent workout</button>` : ''}
+    </div>
+    ${App.lastPlan ? `<p class="small muted" style="margin:8px 0 0;">Last generated ${new Date(App.lastPlan.generatedAt).toLocaleString()}${App.lastPlan.sessionTypes.length ? ' — ' + App.lastPlan.sessionTypes.join(', ') : ''}.</p>` : ''}
+    <div class="field" style="margin-top:14px;"><label>Minutes available</label>
       <input type="number" min="5" max="240" value="${d.minutes}" oninput="App.ui.askDraft.minutes=this.value">
     </div>
     <div class="field"><label>How you're feeling</label>
@@ -1239,6 +1264,12 @@ function renderSettings(){
     <button class="btn btn-secondary" onclick="openQuestionnaire()">Take weak-point check-in now</button>
   </div>
   <div class="card">
+    <h2>Display</h2>
+    <div class="field"><label>Text size</label>
+      ${pillsHTML(['Small','Medium','Large'], s.fontSize.charAt(0).toUpperCase()+s.fontSize.slice(1), 'setFontSize', {sm:true})}
+    </div>
+  </div>
+  <div class="card">
     <h2>Jump to a phase/week</h2>
     <p class="small muted">For an unplanned taper/project week, a missed week, or jumping partway into any phase — this resets the cycle math so today lands exactly where you say.</p>
     <div class="row2">
@@ -1448,6 +1479,7 @@ function submitLog(){
 function toggleEntry(id){ App.ui.expandedEntry = App.ui.expandedEntry === id ? null : id; App.render(); }
 
 function setCycleType(t){ App.settings.cycleType = t; App.render(); }
+function setFontSize(v){ App.settings.fontSize = v.toLowerCase(); App.applyFontSize(); App.saveSettings(); App.render(); }
 function saveSettingsForm(){ App.saveSettings(); App.toast('Settings saved'); App.render(); }
 
 function openQuestionnaire(){ App.ui.qOpen = true; App.ui.qDraft = {}; App.render(); window.scrollTo(0,0); }
@@ -1489,6 +1521,7 @@ window.toggleLogDayType = toggleLogDayType; window.toggleLogFailurePoint = toggl
 window.setClimbLocation = setClimbLocation;
 window.addClimbRow = addClimbRow; window.removeClimbRow = removeClimbRow; window.submitLog = submitLog;
 window.toggleEntry = toggleEntry; window.setCycleType = setCycleType; window.saveSettingsForm = saveSettingsForm;
+window.setFontSize = setFontSize;
 window.openQuestionnaire = openQuestionnaire; window.closeQuestionnaire = closeQuestionnaire;
 window.setQAnswer = setQAnswer; window.submitAssessment = submitAssessment; window.askClaude = askClaude;
 window.applyPhaseOverride = applyPhaseOverride; window.exportData = exportData; window.importData = importData;
@@ -1496,6 +1529,7 @@ window.clearPainFlag = clearPainFlag; window.editEntry = editEntry; window.cance
 window.toggleLogWorkoutStyle = toggleLogWorkoutStyle; window.toggleLogExercise = toggleLogExercise;
 window.deleteEntry = deleteEntry; window.openPlanAsPage = openPlanAsPage; window.savePlanAsImage = savePlanAsImage;
 window.savePlanToLog = savePlanToLog; window.searchExercise = searchExercise; window.setPlanAdherence = setPlanAdherence;
+window.showLastPlan = showLastPlan;
 window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
 window.sharePlan = sharePlan; window.toggleMobilityFocus = toggleMobilityFocus; window.toLocalISO = toLocalISO;
 window.setRoutineStyle = setRoutineStyle;
