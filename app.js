@@ -1095,7 +1095,7 @@ function linkifyPlanToHTML(text){
 // rather than a specific exercise. That's a description of a block, not a tappable thing, so it's
 // deliberately excluded from the exercise classification even though it starts with a bullet marker.
 const PLAN_PHASE_LABELS = /^(warm.?up|cool.?down|volume|near.?limit|limit work|easy climbing|main climbing|climbing volume)\s*[:—–-]/i;
-function classifyPlanLine(line){
+function classifyPlanLineRaw(line){
   if (/^\s*#{1,6}\s+\S/.test(line) || /^\s*\*\*[^*]+\*\*\s*$/.test(line)) return 'header';
   const bulletMatch = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(\S.*)$/);
   if (bulletMatch) {
@@ -1105,46 +1105,68 @@ function classifyPlanLine(line){
   if (!line.trim()) return 'blank';
   return 'other';
 }
-function cleanupEmptyHeaders(lines){
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (classifyPlanLine(lines[i]) !== 'header') continue;
-    let hasExercise = false;
-    for (let j = i+1; j < lines.length; j++) {
-      const cls = classifyPlanLine(lines[j]);
-      if (cls === 'header') break;
-      if (cls === 'exercise') { hasExercise = true; break; }
-    }
-    if (!hasExercise) lines.splice(i, 1);
+function isNumberedLine(line){ return /^\s*\d+[.)]\s+\S/.test(line); }
+function isDashLine(line){ return /^\s*[-*•]\s+\S/.test(line); }
+// Classifies every line of a plan at once, with one context-aware correction on top of the raw
+// per-line read: some plans use a numbered list for section titles ("1. Warm-Up (10 min)") with
+// dash-bulleted exercises underneath. Read in isolation that numbered line looks like a bulleted
+// exercise, which is exactly what made a whole phase heading turn into one fake, searchable tile —
+// so if a numbered "exercise" line is immediately followed (past any blanks) by a dash-bulleted
+// exercise, the numbered line is almost certainly a section title and gets reclassified as a header.
+function classifyPlanLines(lines){
+  const cls = lines.map(classifyPlanLineRaw);
+  for (let i = 0; i < lines.length; i++) {
+    if (cls[i] !== 'exercise' || !isNumberedLine(lines[i])) continue;
+    let j = i + 1;
+    while (j < lines.length && cls[j] === 'blank') j++;
+    if (j < lines.length && cls[j] === 'exercise' && isDashLine(lines[j])) cls[i] = 'header';
   }
+  return cls;
 }
 function collapseBlankRuns(lines){
+  const cls = classifyPlanLines(lines);
   for (let i = lines.length - 1; i > 0; i--) {
-    if (classifyPlanLine(lines[i]) === 'blank' && classifyPlanLine(lines[i-1]) === 'blank') lines.splice(i, 1);
+    if (cls[i] === 'blank' && cls[i-1] === 'blank') lines.splice(i, 1);
   }
 }
 function removePlanLine(index){
-  const lines = (App.ui.planText || '').split('\n');
-  lines.splice(index, 1);
-  cleanupEmptyHeaders(lines);
+  let lines = (App.ui.planText || '').split('\n');
+  // Classify BEFORE removing anything — deleting the target line can itself erase the context
+  // (e.g. a following dash-bulleted exercise) that identified a numbered line as a section header
+  // rather than an exercise, which would otherwise let an emptied header survive uncleaned.
+  const clsBefore = classifyPlanLines(lines);
+  const headersToAlsoRemove = new Set();
+  clsBefore.forEach((c, i) => {
+    if (c !== 'header') return;
+    let hasExercise = false;
+    for (let j = i+1; j < lines.length; j++) {
+      if (j === index) continue; // the line being removed doesn't count either way
+      if (clsBefore[j] === 'header') break;
+      if (clsBefore[j] === 'exercise') { hasExercise = true; break; }
+    }
+    if (!hasExercise) headersToAlsoRemove.add(i);
+  });
+  lines = lines.filter((_, i) => i !== index && !headersToAlsoRemove.has(i));
   collapseBlankRuns(lines);
   App.ui.planText = lines.join('\n');
   App.render();
 }
-function findSectionBounds(lines, index){
+function findSectionBounds(lines, cls, index){
   let start = 0;
-  for (let i = index - 1; i >= 0; i--) { if (classifyPlanLine(lines[i]) === 'header') { start = i + 1; break; } }
+  for (let i = index - 1; i >= 0; i--) { if (cls[i] === 'header') { start = i + 1; break; } }
   let end = lines.length - 1;
-  for (let i = index + 1; i < lines.length; i++) { if (classifyPlanLine(lines[i]) === 'header') { end = i - 1; break; } }
+  for (let i = index + 1; i < lines.length; i++) { if (cls[i] === 'header') { end = i - 1; break; } }
   return { start, end };
 }
 function movePlanLine(index, direction){
   const lines = (App.ui.planText || '').split('\n');
-  if (classifyPlanLine(lines[index]) !== 'exercise') return; // only exercise lines are reorderable
-  const { start, end } = findSectionBounds(lines, index);
+  const cls = classifyPlanLines(lines);
+  if (cls[index] !== 'exercise') return; // only exercise lines are reorderable
+  const { start, end } = findSectionBounds(lines, cls, index);
   let j = index + direction;
   // Skip past blank lines AND plain description text — an exercise tile should only ever trade
   // places with another exercise tile, never end up straddling a line of prose.
-  while (j >= start && j <= end && classifyPlanLine(lines[j]) !== 'exercise') j += direction;
+  while (j >= start && j <= end && cls[j] !== 'exercise') j += direction;
   if (j < start || j > end) return; // would cross into another section — blocked, not just skipped
   const tmp = lines[index]; lines[index] = lines[j]; lines[j] = tmp;
   App.ui.planText = lines.join('\n');
@@ -1157,8 +1179,9 @@ function movePlanLine(index, direction){
 // how long, how many pieces — so the first thing you see reads like an app screen, not a form result.
 function renderPlanHero(text, sessionTypes, minutes){
   const lines = (text||'').split('\n');
+  const cls = classifyPlanLines(lines);
   let exerciseCount = 0, sectionCount = 0;
-  lines.forEach(l => { const c = classifyPlanLine(l); if (c==='exercise') exerciseCount++; if (c==='header') sectionCount++; });
+  cls.forEach(c => { if (c==='exercise') exerciseCount++; if (c==='header') sectionCount++; });
   const typeLabel = (sessionTypes && sessionTypes.length) ? sessionTypes.join(' + ') : 'Workout';
   return `<div class="plan-hero">
     <div class="plan-hero-type">${escHtml(typeLabel)}</div>
@@ -1190,11 +1213,12 @@ function parseHeaderParts(clean){
 function renderPlanEditable(text){
   if (!text) return '';
   const lines = text.split('\n');
+  const allCls = classifyPlanLines(lines);
   let category = 'default';
   return lines.map((line, i) => {
-    const cls = classifyPlanLine(line);
+    const cls = allCls[i];
     if (cls === 'header') {
-      const clean = line.replace(/^\s*#{1,6}\s+/, '').replace(/\*\*/g, '').trim();
+      const clean = line.replace(/^\s*(?:#{1,6}|\d+[.)]|[-*•])\s+/, '').replace(/\*\*/g, '').trim();
       category = categorizeHeader(clean);
       const { title, badge } = parseHeaderParts(clean);
       return `<div class="plan-section-header" style="border-left-color:var(--cat-${category})">
