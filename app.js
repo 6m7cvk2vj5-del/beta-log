@@ -198,7 +198,7 @@ const LS = {
 };
 
 const App = {
-  settings: { apiKey:'', cycleType:'3-2-1', cycleStartDate: todayISO(), gradeIndoor:'', gradeOutdoor:'', fontSize:'medium' },
+  settings: { apiKey:'', cycleType:'3-2-1', cycleStartDate: todayISO(), gradeIndoor:'', gradeOutdoor:'', fontSize:'medium', theme:'light' },
   entries: [],
   assessments: [],
   lastPlan: null, // the most recently generated plan, persisted so it survives a reload/close
@@ -232,10 +232,15 @@ const App = {
     });
     if (migratedEntries) this.saveEntries();
     this.applyFontSize();
+    this.applyTheme();
   },
   applyFontSize() {
     const px = { small: 14, medium: 16, large: 19 }[this.settings.fontSize] || 16;
     document.documentElement.style.fontSize = px + 'px';
+  },
+  applyTheme() {
+    if (this.settings.theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    else document.documentElement.removeAttribute('data-theme');
   },
   saveSettings() { localStorage.setItem(LS.settings, JSON.stringify(this.settings)); },
   saveEntries() { localStorage.setItem(LS.entries, JSON.stringify(this.entries)); },
@@ -263,6 +268,14 @@ function toLocalISO(d){
   return `${y}-${m}-${day}`;
 }
 function todayISO(){ return toLocalISO(new Date()); }
+// CSS variables handle theme-switching everywhere except the few spots that need a literal color
+// string rather than var(--x) — canvas, and inline SVG fill built as plain rgba() text.
+function themeGoldRGB(){ return App.settings.theme === 'dark' ? '204,155,60' : '158,110,36'; }
+function themeColors(){
+  return App.settings.theme === 'dark'
+    ? { bg:'#211F26', surface:'#2A2831', gold:'#CC9B3C', text:'#F3EFE8', muted:'#ACA79E', teal:'#4E8C87' }
+    : { bg:'#F5F3EE', surface:'#FFFFFF', gold:'#9E6E24', text:'#2B281F', muted:'#645F54', teal:'#3A6D67' };
+}
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function freshLogDraft(){
   return { date: todayISO(), type:'Climbing', duration:0, feeling:3, intensity:'Moderate',
@@ -461,7 +474,7 @@ function renderRadarSVG(data, size){
   return `<svg viewBox="0 0 ${size} ${size}" style="width:100%;max-width:320px;height:auto;display:block;overflow:visible;">
     ${rings}${spokes}
     <polygon points="${targetPts}" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3,3"/>
-    <polygon points="${dataPts}" fill="rgba(158,110,36,.35)" stroke="var(--gold)" stroke-width="2"/>
+    <polygon points="${dataPts}" fill="rgba(${themeGoldRGB()},.35)" stroke="var(--gold)" stroke-width="2"/>
     ${labels}
   </svg>`;
 }
@@ -616,15 +629,16 @@ async function sharePlan(){
 function openPlanAsPage(){
   if (!App.ui.planText) return;
   const body = linkifyPlanToHTML(App.ui.planText);
+  const c = themeColors();
   const doc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Beta Log — ${todayISO()}</title>
 <style>
-  body{background:#F5F3EE;color:#2B281F;font-family:-apple-system,BlinkMacSystemFont,'IBM Plex Sans',sans-serif;
+  body{background:${c.bg};color:${c.text};font-family:-apple-system,BlinkMacSystemFont,'IBM Plex Sans',sans-serif;
     max-width:600px;margin:0 auto;padding:24px 18px;line-height:1.6;white-space:pre-wrap;font-size:15px;}
-  h1{font-size:20px;color:#9E6E24;margin-bottom:4px;}
-  p.sub{color:#645F54;font-size:13px;margin-top:0;margin-bottom:20px;}
-  a{color:#9E6E24;text-decoration:underline;text-decoration-style:dotted;}
-  a:active{color:#3A6D67;}
+  h1{font-size:20px;color:${c.gold};margin-bottom:4px;}
+  p.sub{color:${c.muted};font-size:13px;margin-top:0;margin-bottom:20px;}
+  a{color:${c.gold};text-decoration:underline;text-decoration-style:dotted;}
+  a:active{color:${c.teal};}
 </style></head><body>
 <h1>Beta Log — Today's Plan</h1>
 <p class="sub">${todayISO()} &middot; tap any underlined exercise to search it</p>
@@ -656,6 +670,7 @@ function savePlanAsImage(){
   });
   const height = padding*2 + lineHeight*(lines.length + 2);
   canvas.width = width; canvas.height = height;
+  const COLORS_JS = themeColors();
   ctx.fillStyle = COLORS_JS.bg; ctx.fillRect(0,0,width,height);
   ctx.fillStyle = COLORS_JS.gold; ctx.font = 'bold 18px sans-serif';
   ctx.fillText('Beta Log — ' + todayISO(), padding, padding + 4);
@@ -669,7 +684,6 @@ function savePlanAsImage(){
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   });
 }
-const COLORS_JS = { bg:'#F5F3EE', gold:'#9E6E24', text:'#2B281F' };
 function setPlanAdherence(v){ App.ui.planAdherencePick = v; App.render(); }
 function showLastPlan(){
   if (!App.lastPlan) return;
@@ -910,7 +924,12 @@ async function askClaude(feedback){
       "stretching — not on-wall climbing), (2) light easy climbing as a second warmup phase, (3) the main climbing " +
       "volume, (4) some near-limit/limit climbing, (5) climbing-related strength or power exercise, " +
       "(6) a light health circuit covering fingers, wrists, shoulders, forearms, and hips, (7) cooldown/stabilizer " +
-      "work. Never drop a piece, but vary the AMOUNT of each — how much climbing, how much antagonist/stabilizer, " +
+      "work. That numbered list describes the STRUCTURE conceptually — it is not a template for output bullets. " +
+      "Each of these seven pieces gets its own section header in what you write (e.g. '### Volume — 30 min'), never " +
+      "a single bullet point summarizing the whole piece ('- Volume: climb 8-10 problems...' is wrong — a bullet is " +
+      "always one specific, tappable thing, never a paragraph-level description of an entire phase). If a piece is " +
+      "just a general instruction rather than a list of specific things, write it as a plain sentence under its " +
+      "header, not as a bulleted list item. Never drop a piece, but vary the AMOUNT of each — how much climbing, how much antagonist/stabilizer, " +
       "how much cardio — based on the phase, time budget, and the patterns/weekly-rhythm notes below. The finger " +
       "and forearm portion of that health circuit is NEVER optional and never gets cut for time, even on a short " +
       "session — climbing is finger/forearm-dominant, and skipping this is exactly how those get overdeveloped and " +
@@ -1072,9 +1091,17 @@ function linkifyPlanToHTML(text){
 // truth (a plain string) the whole time — every edit reads it, mutates the line array, and writes
 // a plain string straight back, so search/export/share/save-to-log/regenerate all keep working
 // completely unchanged; they have no idea editing happened.
+// A handful of climbing plans phrase a whole phase as one bullet ("- Warmup: 10 min easy climbing")
+// rather than a specific exercise. That's a description of a block, not a tappable thing, so it's
+// deliberately excluded from the exercise classification even though it starts with a bullet marker.
+const PLAN_PHASE_LABELS = /^(warm.?up|cool.?down|volume|near.?limit|limit work|easy climbing|main climbing|climbing volume)\s*[:—–-]/i;
 function classifyPlanLine(line){
   if (/^\s*#{1,6}\s+\S/.test(line) || /^\s*\*\*[^*]+\*\*\s*$/.test(line)) return 'header';
-  if (/^\s*(?:[-*•]|\d+[.)])\s+\S/.test(line)) return 'exercise';
+  const bulletMatch = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(\S.*)$/);
+  if (bulletMatch) {
+    if (PLAN_PHASE_LABELS.test(bulletMatch[1].replace(/\*\*/g, '').trim())) return 'other';
+    return 'exercise';
+  }
   if (!line.trim()) return 'blank';
   return 'other';
 }
@@ -1115,7 +1142,9 @@ function movePlanLine(index, direction){
   if (classifyPlanLine(lines[index]) !== 'exercise') return; // only exercise lines are reorderable
   const { start, end } = findSectionBounds(lines, index);
   let j = index + direction;
-  while (j >= start && j <= end && classifyPlanLine(lines[j]) === 'blank') j += direction;
+  // Skip past blank lines AND plain description text — an exercise tile should only ever trade
+  // places with another exercise tile, never end up straddling a line of prose.
+  while (j >= start && j <= end && classifyPlanLine(lines[j]) !== 'exercise') j += direction;
   if (j < start || j > end) return; // would cross into another section — blocked, not just skipped
   const tmp = lines[index]; lines[index] = lines[j]; lines[j] = tmp;
   App.ui.planText = lines.join('\n');
@@ -1173,7 +1202,10 @@ function renderPlanEditable(text){
         ${badge ? `<span class="plan-badge">${escHtml(badge)}</span>` : ''}
       </div>`;
     }
-    if (cls !== 'exercise') return line.trim() ? `<div class="plan-plain">${escHtml(line)}</div>` : '';
+    if (cls !== 'exercise') {
+      const clean = line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').replace(/\*\*/g, '');
+      return clean.trim() ? `<div class="plan-plain">${escHtml(clean)}</div>` : '';
+    }
     const bulletMatch = line.match(/^(\s*(?:[-*•]|\d+[.)])\s+)(.*)$/);
     const body = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
     const sepMatch = body.match(/^(.*?)(:|—|–|,| - )([\s\S]*)$/);
@@ -1526,7 +1558,7 @@ function renderHistory(){
   const maxDur = Math.max(1, ...days.map(d=>d.totalMinutes));
   const heat = weeks.map(w => `<div class="heatcol">${w.map(cell=>{
     const inten = cell.d ? Math.max(.18, cell.d.totalMinutes/maxDur) : 0;
-    return `<div class="heatcell" title="${cell.date}${cell.d?' — '+cell.d.totalMinutes+'min':''}" style="background:${cell.d?`rgba(158,110,36,${inten})`:'var(--surface2)'}"></div>`;
+    return `<div class="heatcell" title="${cell.date}${cell.d?' — '+cell.d.totalMinutes+'min':''}" style="background:${cell.d?`rgba(${themeGoldRGB()},${inten})`:'var(--surface2)'}"></div>`;
   }).join('')}</div>`).join('');
 
   // minutes, last 14 calendar days (one bar per day, combined)
@@ -1644,6 +1676,9 @@ function renderSettings(){
   </div>
   <div class="card">
     <h2>Display</h2>
+    <div class="field"><label>Theme</label>
+      ${pillsHTML(['Light','Dark'], s.theme.charAt(0).toUpperCase()+s.theme.slice(1), 'setTheme', {sm:true})}
+    </div>
     <div class="field"><label>Text size</label>
       ${pillsHTML(['Small','Medium','Large'], s.fontSize.charAt(0).toUpperCase()+s.fontSize.slice(1), 'setFontSize', {sm:true})}
     </div>
@@ -1857,6 +1892,7 @@ function toggleEntry(id){ App.ui.expandedEntry = App.ui.expandedEntry === id ? n
 
 function setCycleType(t){ App.settings.cycleType = t; App.render(); }
 function setFontSize(v){ App.settings.fontSize = v.toLowerCase(); App.applyFontSize(); App.saveSettings(); App.render(); }
+function setTheme(v){ App.settings.theme = v.toLowerCase(); App.applyTheme(); App.saveSettings(); App.render(); }
 function saveSettingsForm(){ App.saveSettings(); App.toast('Settings saved'); App.render(); }
 
 function openQuestionnaire(){ App.ui.qOpen = true; App.ui.qDraft = {}; App.render(); window.scrollTo(0,0); }
@@ -1903,6 +1939,7 @@ window.setClimbLocation = setClimbLocation;
 window.addClimbRow = addClimbRow; window.removeClimbRow = removeClimbRow; window.submitLog = submitLog;
 window.toggleEntry = toggleEntry; window.setCycleType = setCycleType; window.saveSettingsForm = saveSettingsForm;
 window.setFontSize = setFontSize;
+window.setTheme = setTheme;
 window.openQuestionnaire = openQuestionnaire; window.closeQuestionnaire = closeQuestionnaire;
 window.setQAnswer = setQAnswer; window.submitAssessment = submitAssessment; window.askClaude = askClaude;
 window.applyPhaseOverride = applyPhaseOverride; window.exportData = exportData; window.importData = importData;
