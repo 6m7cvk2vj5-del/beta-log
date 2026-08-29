@@ -202,11 +202,12 @@ const App = {
   entries: [],
   assessments: [],
   lastPlan: null, // the most recently generated plan, persisted so it survives a reload/close
-  ui: { tab:'today', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
-        qDraft: {}, qOpen:false, expandedEntry:null, planLoading:false, planError:'', planText:'',
+  ui: { tab:'home', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
+        qDraft: {}, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, planLoading:false, planError:'', planText:'',
         editingId:null, planFeedback:'', lastPlanContext:null, showAdherence:false, planAdherencePick:'',
-        importLoading:false, importError:'', infoPopup:null,
-        timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false } },
+        importLoading:false, importError:'', infoPopup:null, heatmapWeeks:12,
+        timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false },
+        stopwatch: { elapsedSeconds:0, running:false, intervalId:null } },
 
   load() {
     try { const s = localStorage.getItem(LS.settings); if (s) this.settings = Object.assign(this.settings, JSON.parse(s)); } catch(e){}
@@ -227,6 +228,17 @@ const App = {
       if (e.type === 'Mobility / Stretch') { e.type = 'Flexibility / Stretch'; migratedEntries = true; }
       if (Array.isArray(e.workoutStyles) && e.workoutStyles.includes('Stretch/Mobility')) {
         e.workoutStyles = e.workoutStyles.map(s => s === 'Stretch/Mobility' ? 'Stretch/Flexibility' : s);
+        migratedEntries = true;
+      }
+    });
+    // schema migration: "Flexibility / Stretch" used to store its minutes in the timeMobility field,
+    // before "Mobility" split off into its own separate type with that field repurposed for it. Old
+    // entries never got their minutes moved to the new timeFlexibility field, which is why old
+    // flexibility sessions were showing up under the Mobility axis on the spider chart instead.
+    this.entries.forEach(e => {
+      if (e.type === 'Flexibility / Stretch' && Number(e.timeMobility) > 0 && !Number(e.timeFlexibility)) {
+        e.timeFlexibility = (Number(e.timeFlexibility) || 0) + Number(e.timeMobility);
+        e.timeMobility = 0;
         migratedEntries = true;
       }
     });
@@ -257,7 +269,7 @@ const App = {
     this._toastTimer = setTimeout(()=>t.classList.remove('show'), 1800);
   },
 
-  setTab(tab) { this.ui.tab = tab; this.render(); },
+  setTab(tab) { this.ui.tab = tab; this.ui.settingsOpen = false; this.render(); },
 };
 
 // UTC-based date strings are the wrong tool here: toISOString() converts to UTC first, so anyone
@@ -334,7 +346,7 @@ function setPhaseManually(phaseName, weekOfPhase){
   App.settings.cycleStartDate = toLocalISO(newStart);
   App.saveSettings();
   App.toast('Set to ' + phaseName + ', week ' + weekOfPhase);
-  App.setTab('today');
+  App.setTab('home');
 }
 function applyPhaseOverride(){
   const phaseName = document.getElementById('overridePhase').value;
@@ -689,9 +701,8 @@ function showLastPlan(){
   if (!App.lastPlan) return;
   App.ui.planText = App.lastPlan.text;
   App.ui.planError = '';
-  App.render();
-  const box = document.querySelector('.plan-box');
-  if (box && box.scrollIntoView) box.scrollIntoView({behavior:'smooth', block:'start'});
+  App.ui.planUnlocked = true;
+  App.setTab('plan');
 }
 // Shared with the "Add this to today's log" flow — same extraction, same validation, same schema,
 // whether the text came from an uploaded file or a Claude-generated plan.
@@ -1016,13 +1027,23 @@ async function askClaude(feedback){
     const data = await res.json();
     if (data.error) throw new Error(data.error.message || 'API error');
     const text = (data.content||[]).map(b=>b.text||'').join('\n').trim();
-    App.ui.planText = text || 'No response came back — try again.';
+    if (!text) {
+      App.ui.planError = 'No response came back — try again.';
+      App.ui.planLoading = false;
+      App.render();
+      return;
+    }
+    App.ui.planText = text;
     App.ui.planFeedback = '';
-    if (text) App.saveLastPlan(text, App.ui.askDraft.sessionTypes);
+    App.ui.planError = '';
+    App.saveLastPlan(text, App.ui.askDraft.sessionTypes);
+    App.ui.planUnlocked = true;
+    App.ui.planLoading = false; // clear before switching tabs, or the new tab renders stuck "loading"
+    App.setTab('plan');
   } catch(e) {
     App.ui.planError = 'Could not reach Claude: ' + e.message;
-  } finally {
-    App.ui.planLoading = false; App.render();
+    App.ui.planLoading = false;
+    App.render();
   }
 }
 
@@ -1251,33 +1272,47 @@ function renderPlanEditable(text){
 }
 
 App.render = function(){
-  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === App.ui.tab));
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', !App.ui.qOpen && !App.ui.settingsOpen && b.dataset.tab === App.ui.tab));
+  const planBtn = document.getElementById('planTabBtn');
+  if (planBtn) planBtn.classList.toggle('hidden', !App.ui.planUnlocked);
+  const gearBtn = document.getElementById('gearBtn');
+  if (gearBtn) gearBtn.classList.toggle('gear-active', App.ui.settingsOpen);
   const panel = document.getElementById('panels');
   if (App.ui.qOpen) { panel.innerHTML = renderQuestionnaire(); }
-  else if (App.ui.tab === 'today') panel.innerHTML = renderToday();
-  else if (App.ui.tab === 'log') panel.innerHTML = renderLog();
-  else if (App.ui.tab === 'history') panel.innerHTML = renderHistory();
-  else panel.innerHTML = renderSettings();
+  else if (App.ui.settingsOpen) { panel.innerHTML = renderSettings(); }
+  else if (App.ui.tab === 'home') panel.innerHTML = renderHome();
+  else if (App.ui.tab === 'ask') panel.innerHTML = renderAsk();
+  else if (App.ui.tab === 'plan') panel.innerHTML = renderPlan();
+  else panel.innerHTML = renderLog();
   document.getElementById('infoOverlay').innerHTML = App.ui.infoPopup
     ? `<div class="info-overlay" onclick="if(event.target===this) closeInfo()">
         <div class="info-popup"><button class="close-x" onclick="closeInfo()">&times;</button><p>${escHtml(App.ui.infoPopup)}</p></div>
       </div>`
     : '';
 };
+function openSettings(){ App.ui.settingsOpen = true; App.render(); }
+function closeSettings(){ App.ui.settingsOpen = false; App.render(); }
 function infoIcon(text){ return `<button type="button" class="info-icon" onclick="event.stopPropagation(); showInfo('${escAttr(text)}')">i</button>`; }
 function showInfo(text){ App.ui.infoPopup = text; App.render(); }
 function closeInfo(){ App.ui.infoPopup = null; App.render(); }
 
 // ---- Countdown timer for circuits — a fixed dial at the bottom of Today, keeps running across
 // tabs (the interval doesn't care what's on screen), only the widget itself is Today-only.
-const TIMER_PRESETS = [15, 30, 45, 60, 90];
+const TIMER_PRESETS = [15, 30, 45, 60, 90, 120, 180];
+function formatPresetLabel(s){
+  if (s < 60) return s + 's';
+  const m = Math.floor(s/60), rem = s%60;
+  return rem === 0 ? m+'m' : m+':'+String(rem).padStart(2,'0');
+}
+function formatMMSS(totalSeconds){
+  const mm = Math.floor(totalSeconds / 60), ss = totalSeconds % 60;
+  return `${mm}:${String(ss).padStart(2,'0')}`;
+}
 function renderTimerWidget(){
-  const t = App.ui.timer;
+  const t = App.ui.timer, sw = App.ui.stopwatch;
   const r = 22, circumference = 2 * Math.PI * r;
   const frac = t.totalSeconds > 0 ? t.remainingSeconds / t.totalSeconds : 0;
   const offset = circumference * (1 - frac);
-  const mm = Math.floor(t.remainingSeconds / 60), ss = t.remainingSeconds % 60;
-  const timeStr = `${mm}:${String(ss).padStart(2,'0')}`;
   return `<div class="timer-bar">
     <div class="timer-row">
       <button type="button" class="timer-dial-btn" onclick="toggleTimerPicker()" title="Choose time">
@@ -1285,15 +1320,21 @@ function renderTimerWidget(){
           <circle cx="24" cy="24" r="${r}" fill="none" stroke="var(--border)" stroke-width="4"/>
           <circle id="timerRing" cx="24" cy="24" r="${r}" fill="none" stroke="${t.remainingSeconds===0?'var(--red)':'var(--gold)'}" stroke-width="4"
             stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" stroke-linecap="round" transform="rotate(-90 24 24)" style="transition:stroke-dashoffset 1s linear;"/>
-          <text id="timerNum" x="24" y="28" text-anchor="middle" font-size="11.5" fill="var(--text)" font-family="'IBM Plex Sans',sans-serif">${timeStr}</text>
+          <text id="timerNum" x="24" y="28" text-anchor="middle" font-size="11.5" fill="var(--text)" font-family="'IBM Plex Sans',sans-serif">${formatMMSS(t.remainingSeconds)}</text>
         </svg>
       </button>
       <button class="btn btn-primary" style="width:auto;padding:9px 16px;flex:none;" id="timerToggleBtn" onclick="toggleTimer()">${t.running ? 'Pause' : (t.remainingSeconds < t.totalSeconds && t.remainingSeconds > 0 ? 'Resume' : 'Start')}</button>
       <button class="btn btn-ghost" style="width:auto;padding:9px 12px;flex:none;" onclick="resetTimer()">Reset</button>
     </div>
     ${t.pickerOpen ? `<div class="timer-presets">
-      ${TIMER_PRESETS.map(s=>`<button class="pill sm${t.totalSeconds===s?' active':''}" onclick="setTimerPreset(${s})">${s}s</button>`).join('')}
+      ${TIMER_PRESETS.map(s=>`<button class="pill sm${t.totalSeconds===s?' active':''}" onclick="setTimerPreset(${s})">${formatPresetLabel(s)}</button>`).join('')}
     </div>` : ''}
+    <div class="stopwatch-row">
+      <span class="stopwatch-label">Stopwatch</span>
+      <span id="stopwatchNum" class="stopwatch-num">${formatMMSS(sw.elapsedSeconds)}</span>
+      <button class="btn btn-ghost" style="width:auto;padding:7px 14px;flex:none;" id="stopwatchToggleBtn" onclick="toggleStopwatch()">${sw.running ? 'Pause' : (sw.elapsedSeconds > 0 ? 'Resume' : 'Start')}</button>
+      <button class="btn btn-ghost" style="width:auto;padding:7px 12px;flex:none;" onclick="resetStopwatch()">Reset</button>
+    </div>
   </div>`;
 }
 function toggleTimerPicker(){ App.ui.timer.pickerOpen = !App.ui.timer.pickerOpen; App.render(); }
@@ -1326,15 +1367,14 @@ function tickTimer(){
   const t = App.ui.timer;
   t.remainingSeconds = Math.max(0, t.remainingSeconds - 1);
   // Direct DOM update, not a full App.render() — avoids interrupting typing or an open popup
-  // elsewhere, and the widget only exists in the DOM at all when Today is the active tab.
+  // elsewhere, and the widget only exists in the DOM at all when a plan is showing.
   const ring = document.getElementById('timerRing');
   const num = document.getElementById('timerNum');
   if (ring && num) {
     const r = 24, circumference = 2 * Math.PI * r;
     const frac = t.totalSeconds > 0 ? t.remainingSeconds / t.totalSeconds : 0;
     ring.setAttribute('stroke-dashoffset', circumference * (1 - frac));
-    const mm = Math.floor(t.remainingSeconds / 60), ss = t.remainingSeconds % 60;
-    num.textContent = `${mm}:${String(ss).padStart(2,'0')}`;
+    num.textContent = formatMMSS(t.remainingSeconds);
     if (t.remainingSeconds === 0) ring.setAttribute('stroke', 'var(--red)');
   }
   if (t.remainingSeconds === 0) {
@@ -1360,17 +1400,38 @@ function playTimerBeep(){
     });
   } catch(e) { /* audio not available — the vibration + visual change still happened */ }
 }
+function pauseStopwatchInterval(){
+  if (App.ui.stopwatch.intervalId) { clearInterval(App.ui.stopwatch.intervalId); App.ui.stopwatch.intervalId = null; }
+}
+function toggleStopwatch(){
+  const sw = App.ui.stopwatch;
+  if (sw.running) { pauseStopwatchInterval(); sw.running = false; App.render(); return; }
+  sw.running = true;
+  sw.intervalId = setInterval(tickStopwatch, 1000);
+  App.render();
+}
+function resetStopwatch(){
+  pauseStopwatchInterval();
+  App.ui.stopwatch.elapsedSeconds = 0;
+  App.ui.stopwatch.running = false;
+  App.render();
+}
+function tickStopwatch(){
+  const sw = App.ui.stopwatch;
+  sw.elapsedSeconds += 1;
+  const num = document.getElementById('stopwatchNum');
+  if (num) num.textContent = formatMMSS(sw.elapsedSeconds);
+}
 
-function renderToday(){
+function renderHome(){
   if (!App.settings.cycleStartDate) {
-    return `<div class="card"><h2>Set up your cycle first</h2><p class="small muted">Head to Settings to pick your cycle type and start date.</p>
-      <button class="btn btn-primary" onclick="App.setTab('settings')">Go to Settings</button></div>`;
+    return `<div class="card"><h2>Set up your cycle first</h2><p class="small muted">Open Settings to pick your cycle type and start date.</p>
+      <button class="btn btn-primary" onclick="openSettings()">Go to Settings</button></div>`;
   }
   const cycle = getCycleState(App.settings);
   const flags = detectPatterns(App.entries);
   const dueCount = climbingSessionsSinceLastAssessment();
-  const d = App.ui.askDraft;
-  const weak = getWeakPointProfile();
+  const entries = [...App.entries].sort((a,b)=> b.date.localeCompare(a.date));
 
   let banners = '';
   const painStatus = getMostRecentPainStatus(App.entries);
@@ -1384,7 +1445,70 @@ function renderToday(){
   }
   flags.forEach(f => { banners += `<div class="banner warn">${escHtml(f)}</div>`; });
 
-  const weakOptionLabel = weak.categoryRank ? `Weakest area: ${weak.categoryRank[0][0]}` : null;
+  const ctas = `
+  <div class="card">
+    <button class="btn btn-primary" onclick="App.setTab('ask')">Ask for today's plan</button>
+    ${App.lastPlan ? `<button class="btn btn-ghost" style="margin-top:8px;" onclick="showLastPlan()">See most recent workout</button>` : ''}
+    <button class="btn btn-ghost" style="margin-top:8px;" onclick="App.setTab('log')">Log a session</button>
+    ${App.lastPlan ? `<p class="small muted" style="margin-top:8px;">Last generated ${new Date(App.lastPlan.generatedAt).toLocaleString()}${App.lastPlan.sessionTypes.length ? ' — ' + App.lastPlan.sessionTypes.join(', ') : ''}.</p>` : ''}
+  </div>`;
+
+  if (entries.length === 0) {
+    return `
+    <div class="card">
+      <div class="phase-banner">
+        <div><div class="phase-name">${escHtml(cycle.phaseName)}</div>
+          <div class="small muted">Week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks} &middot; ${App.settings.cycleType}</div></div>
+      </div>
+      <p class="small" style="margin-top:10px;">${escHtml(PHASE_GUIDANCE[cycle.phaseName] || '')}</p>
+    </div>
+    ${banners}
+    ${ctas}
+    <div class="card"><p class="muted small">No entries yet — log a session or ask for a plan to start seeing your training picture here.</p></div>`;
+  }
+
+  const days = dayList(entries); // one record per calendar day, entries already combined
+  const climbDayCount = days.filter(d => classifyDay(d)==='Climb').length;
+  const sinceAssessment = climbingSessionsSinceLastAssessment();
+
+  // heatmap — keyed by day-aggregate so a 3-entry day still shows as one cell; range is selectable
+  const map = {}; days.forEach(d => { map[d.date] = d; });
+  const totalDays = App.ui.heatmapWeeks * 7;
+  const cal = [];
+  const today = new Date(todayISO()+'T00:00:00');
+  for (let i=totalDays-1;i>=0;i--){ const dd=new Date(today); dd.setDate(dd.getDate()-i); const iso=toLocalISO(dd); cal.push({date:iso, d:map[iso]||null}); }
+  const weeks = []; for (let i=0;i<cal.length;i+=7) weeks.push(cal.slice(i,i+7));
+  const maxDur = Math.max(1, ...days.map(d=>d.totalMinutes));
+  const heat = weeks.map(w => `<div class="heatcol">${w.map(cell=>{
+    const inten = cell.d ? Math.max(.18, cell.d.totalMinutes/maxDur) : 0;
+    return `<div class="heatcell" title="${cell.date}${cell.d?' — '+cell.d.totalMinutes+'min':''}" style="background:${cell.d?`rgba(${themeGoldRGB()},${inten})`:'var(--surface2)'}"></div>`;
+  }).join('')}</div>`).join('');
+
+  // minutes, last 14 calendar days (one bar per day, combined) — kept separate from the rhythm view
+  const last14 = days.slice(0,14).reverse();
+  const maxMin14 = Math.max(1, ...last14.map(d=>d.totalMinutes));
+  const minBars = last14.map(d => `<div class="bar-row"><div class="bar-label">${d.date.slice(5)}</div>
+    <div class="bar-track"><div class="bar-fill" style="width:${d.totalMinutes/maxMin14*100}%"></div></div>
+    <div class="bar-val">${d.totalMinutes}</div></div>`).join('');
+
+  // focus area frequency (by day, so a focus worked 3x same day still counts once)
+  const counts = {}; FOCUS_AREAS.forEach(a=>counts[a]=0);
+  days.forEach(d => d.focus.forEach(a=>{counts[a]=(counts[a]||0)+1;}));
+  const maxCount = Math.max(1, ...Object.values(counts));
+  const focusBars = FOCUS_AREAS.map(a => `<div class="bar-row"><div class="bar-label">${a}</div>
+    <div class="bar-track"><div class="bar-fill" style="width:${counts[a]/maxCount*100}%"></div></div>
+    <div class="bar-val">${counts[a]}</div></div>`).join('');
+
+  // weekly balance radar + template comparison
+  const radarData = computeWeeklyRadarData(entries);
+  const tmpl = compareToWeeklyTemplate(entries);
+  const tmplRow = tmpl.rows.map(r => {
+    const mismatch = !r.isFuture && r.actual !== r.template && r.actual !== 'No entry';
+    return `<div class="bar-row" style="align-items:center;opacity:${r.isFuture?0.45:1};">
+      <div class="bar-label" style="width:36px;flex:none;">${r.day}</div>
+      <div style="flex:1;font-size:13px;${mismatch?'color:var(--red);':''}">${r.isFuture ? '—' : escHtml(r.actual)} <span class="small muted">(usually ${r.template})</span></div>
+    </div>`;
+  }).join('');
 
   return `
   <div class="card">
@@ -1393,15 +1517,47 @@ function renderToday(){
         <div class="small muted">Week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks} &middot; ${App.settings.cycleType}</div></div>
     </div>
     <p class="small" style="margin-top:10px;">${escHtml(PHASE_GUIDANCE[cycle.phaseName] || '')}</p>
+    <div class="statgrid" style="margin-top:14px;">
+      <div class="stat"><div class="num">${days.length}</div><div class="lbl">Days logged</div></div>
+      <div class="stat"><div class="num">${climbDayCount}</div><div class="lbl">Climbing days</div></div>
+      <div class="stat"><div class="num">${sinceAssessment}</div><div class="lbl">Since check-in</div></div>
+    </div>
   </div>
   ${renderBriefingCard(App.entries)}
   ${banners}
+  ${ctas}
+  <div class="card">
+    <h2>Weekly balance${infoIcon('Trailing 7 days vs. rough weekly targets. Dashed ring = target; gold = you.')}</h2>
+    <div style="display:flex;justify-content:center;">${renderRadarSVG(radarData)}</div>
+  </div>
+  <div class="card"><h2>Minutes, last 14 days</h2><div class="barlist">${minBars}</div></div>
+  <div class="card">
+    <h2>This week vs. your usual rhythm${infoIcon('Reference rhythm: Mon rest, Tue climb, Wed exercise, Thu climb, Fri rest, Sat/Sun climb.')}</h2>
+    <div class="barlist">${tmplRow}</div>
+    ${tmpl.notes.length ? `<p class="small" style="margin-top:10px;color:var(--red);">${tmpl.notes.join(' ')}</p>` : `<p class="small muted" style="margin-top:10px;">Tracking the usual rhythm so far this week.</p>`}
+  </div>
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;">
-      <h2 style="margin-bottom:0;">Ask for today's plan</h2>
-      ${App.lastPlan ? `<button class="btn btn-ghost" style="width:auto;padding:6px 12px;" onclick="showLastPlan()">See most recent workout</button>` : ''}
+      <h2 style="margin-bottom:0;">Last ${App.ui.heatmapWeeks} weeks</h2>
+      <select style="width:auto;padding:6px 10px;font-size:0.8rem;" onchange="setHeatmapWeeks(this.value)">
+        ${[4,8,12,26].map(w=>`<option value="${w}" ${App.ui.heatmapWeeks===w?'selected':''}>${w} weeks</option>`).join('')}
+      </select>
     </div>
-    ${App.lastPlan ? `<p class="small muted" style="margin:8px 0 0;">Last generated ${new Date(App.lastPlan.generatedAt).toLocaleString()}${App.lastPlan.sessionTypes.length ? ' — ' + App.lastPlan.sessionTypes.join(', ') : ''}.</p>` : ''}
+    <div class="heatgrid" style="margin-top:10px;">${heat}</div>
+  </div>
+  <div class="card"><h2>Focus area attention</h2><div class="barlist">${focusBars}</div></div>`;
+}
+
+function renderAsk(){
+  if (!App.settings.cycleStartDate) {
+    return `<div class="card"><p class="small muted">Set up your cycle on Home first.</p><button class="btn btn-primary" onclick="App.setTab('home')">Go to Home</button></div>`;
+  }
+  const d = App.ui.askDraft;
+  const weak = getWeakPointProfile();
+  const weakOptionLabel = weak.categoryRank ? `Weakest area: ${weak.categoryRank[0][0]}` : null;
+  return `
+  <div class="card">
+    <h2>Ask for today's plan</h2>
     <div class="field" style="margin-top:14px;"><label>Minutes available: <b id="slider_askMinutes_val">${d.minutes}</b> min</label>
       <input type="range" min="10" max="180" step="5" value="${d.minutes}"
         oninput="App.ui.askDraft.minutes=Number(this.value); document.getElementById('slider_askMinutes_val').textContent=this.value;">
@@ -1449,7 +1605,18 @@ function renderToday(){
     </div>
     <button class="btn btn-primary" onclick="askClaude()" ${App.ui.planLoading?'disabled':''}>${App.ui.planLoading ? 'Thinking…' : "Get today's plan"}</button>
     ${App.ui.planError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.planError)}</p>` : ''}
-    ${App.ui.planText ? `${renderPlanHero(App.ui.planText, d.sessionTypes, d.minutes)}
+  </div>`;
+}
+
+function renderPlan(){
+  if (!App.ui.planText) {
+    return `<div class="card"><p class="small muted">No plan showing right now.</p>
+      <button class="btn btn-primary" style="margin-top:10px;" onclick="App.setTab('ask')">Ask for today's plan</button></div>`;
+  }
+  const d = App.ui.askDraft;
+  return `
+  <div class="card">
+    ${renderPlanHero(App.ui.planText, d.sessionTypes, d.minutes)}
     ${renderTimerWidget()}
     <div class="plan-editable">${renderPlanEditable(App.ui.planText)}</div>
     <p class="small muted" style="margin-top:6px;">Tap a name to search it, use the arrows to reorder, &times; to drop it. ${infoIcon("Removing every exercise under a heading also removes the heading. All the export/share/save options below use whatever's currently shown here.")}</p>
@@ -1464,16 +1631,17 @@ function renderToday(){
       <label>If you already did it (or partly did it) — how close did you end up sticking to this?</label>
       ${pillsHTML(ADHERENCE_OPTIONS, App.ui.planAdherencePick, 'setPlanAdherence', {sm:true})}
       <button class="btn btn-secondary" style="margin-top:8px;" onclick="saveGeneratedPlanToLog()" ${(App.ui.planAdherencePick && !App.ui.importLoading) ? '' : 'disabled'}>${App.ui.importLoading ? 'Reading the plan…' : "Save to today's entry"}</button>
-      
       ${App.ui.importError ? `<p class="small" style="color:var(--red);margin-top:6px;">${escHtml(App.ui.importError)}</p>` : ''}
     </div>` : ''}
     <div class="field" style="margin-top:12px;">
       <label>Want to adjust this?</label>
       <textarea placeholder="e.g. swap the finger work for more core, I only actually have 30 min, less bouldering today..." oninput="App.ui.planFeedback=this.value; document.getElementById('regenBtn').disabled = !this.value.trim();">${escHtml(App.ui.planFeedback)}</textarea>
       <button id="regenBtn" class="btn btn-secondary" style="margin-top:8px;" onclick="askClaude(App.ui.planFeedback)" ${App.ui.planLoading || !App.ui.planFeedback.trim() ? 'disabled' : ''}>${App.ui.planLoading ? 'Thinking…' : 'Regenerate with this feedback'}</button>
-    </div>` : ''}
-  </div>`;
+    </div>
+  </div>
+  <div class="timer-spacer"></div>`;
 }
+function setHeatmapWeeks(w){ App.ui.heatmapWeeks = Number(w); App.render(); }
 
 function sliderRow(label, field, value, max){
   max = max || 120;
@@ -1564,58 +1732,8 @@ function renderLog(){
   </div>`;
 }
 
-function renderHistory(){
+function renderEntriesAndCheckins(){
   const entries = [...App.entries].sort((a,b)=> b.date.localeCompare(a.date));
-  if (entries.length === 0) {
-    return `<div class="card"><p class="muted small">No entries yet. Log a session on the Log tab to start stacking your history.</p></div>`;
-  }
-  const days = dayList(entries); // one record per calendar day, entries already combined
-  const climbDayCount = days.filter(d => classifyDay(d)==='Climb').length;
-  const sinceAssessment = climbingSessionsSinceLastAssessment();
-
-  // last 12 weeks heatmap — keyed by day-aggregate so a 3-entry day still shows as one cell
-  const map = {}; days.forEach(d => { map[d.date] = d; });
-  const cal = [];
-  const today = new Date(todayISO()+'T00:00:00');
-  for (let i=83;i>=0;i--){ const dd=new Date(today); dd.setDate(dd.getDate()-i); const iso=toLocalISO(dd); cal.push({date:iso, d:map[iso]||null}); }
-  const weeks = []; for (let i=0;i<cal.length;i+=7) weeks.push(cal.slice(i,i+7));
-  const maxDur = Math.max(1, ...days.map(d=>d.totalMinutes));
-  const heat = weeks.map(w => `<div class="heatcol">${w.map(cell=>{
-    const inten = cell.d ? Math.max(.18, cell.d.totalMinutes/maxDur) : 0;
-    return `<div class="heatcell" title="${cell.date}${cell.d?' — '+cell.d.totalMinutes+'min':''}" style="background:${cell.d?`rgba(${themeGoldRGB()},${inten})`:'var(--surface2)'}"></div>`;
-  }).join('')}</div>`).join('');
-
-  // minutes, last 14 calendar days (one bar per day, combined)
-  const last14 = days.slice(0,14).reverse();
-  const maxMin14 = Math.max(1, ...last14.map(d=>d.totalMinutes));
-  const minBars = last14.map(d => `<div class="bar-row"><div class="bar-label">${d.date.slice(5)}</div>
-    <div class="bar-track"><div class="bar-fill" style="width:${d.totalMinutes/maxMin14*100}%"></div></div>
-    <div class="bar-val">${d.totalMinutes}</div></div>`).join('');
-
-  // focus area frequency (by day, so a focus worked 3x same day still counts once)
-  const counts = {}; FOCUS_AREAS.forEach(a=>counts[a]=0);
-  days.forEach(d => d.focus.forEach(a=>{counts[a]=(counts[a]||0)+1;}));
-  const maxCount = Math.max(1, ...Object.values(counts));
-  const focusBars = FOCUS_AREAS.map(a => `<div class="bar-row"><div class="bar-label">${a}</div>
-    <div class="bar-track"><div class="bar-fill" style="width:${counts[a]/maxCount*100}%"></div></div>
-    <div class="bar-val">${counts[a]}</div></div>`).join('');
-
-  // weekly balance radar + template comparison
-  const radarData = computeWeeklyRadarData(entries);
-  const tmpl = compareToWeeklyTemplate(entries);
-  const tmplRow = tmpl.rows.map(r => {
-    const mismatch = !r.isFuture && r.actual !== r.template && r.actual !== 'No entry';
-    return `<div class="bar-row" style="align-items:center;opacity:${r.isFuture?0.45:1};">
-      <div class="bar-label" style="width:36px;flex:none;">${r.day}</div>
-      <div style="flex:1;font-size:13px;${mismatch?'color:var(--red);':''}">${r.isFuture ? '—' : escHtml(r.actual)} <span class="small muted">(usually ${r.template})</span></div>
-    </div>`;
-  }).join('');
-  const guidelines = computeWeeklyGuidelines(entries);
-  const guidelineRows = guidelines.map(g => `<div class="bar-row" style="align-items:flex-start;">
-      <div style="width:20px;flex:none;color:${g.ok?'var(--teal)':'var(--muted)'};font-weight:700;">${g.ok?'✓':'—'}</div>
-      <div style="flex:1;"><div class="small">${escHtml(g.label)}</div><div class="small muted">${escHtml(g.detail)}</div></div>
-    </div>`).join('');
-
   const entryRows = entries.map(e => `
     <div class="entry">
       <button class="entry-head" onclick="toggleEntry('${e.id}')">
@@ -1641,7 +1759,7 @@ function renderHistory(){
           <button class="btn btn-ghost" style="width:auto;padding:8px 14px;color:var(--red);border-color:var(--red);" onclick="deleteEntry('${e.id}')">Delete this entry</button>
         </div>
       </div>` : ''}
-    </div>`).join('');
+    </div>`).join('') || '<p class="small muted">No entries yet.</p>';
 
   const assessRows = App.assessments.slice().reverse().map(a => {
     const ranked = Object.entries(a.scores).sort((x,y)=>x[1]-y[1]);
@@ -1650,29 +1768,6 @@ function renderHistory(){
   }).join('') || '<p class="small muted">No check-ins taken yet.</p>';
 
   return `
-  <div class="card"><h2>Overview</h2>
-    <div class="statgrid">
-      <div class="stat"><div class="num">${days.length}</div><div class="lbl">Days logged</div></div>
-      <div class="stat"><div class="num">${climbDayCount}</div><div class="lbl">Climbing days</div></div>
-      <div class="stat"><div class="num">${sinceAssessment}</div><div class="lbl">Since check-in</div></div>
-    </div>
-  </div>
-  <div class="card">
-    <h2>Weekly balance${infoIcon('Trailing 7 days vs. rough weekly targets. Dashed ring = target; gold = you.')}</h2>
-    <div style="display:flex;justify-content:center;">${renderRadarSVG(radarData)}</div>
-  </div>
-  <div class="card">
-    <h2>Your weekly guidelines${infoIcon("These are things to touch base on, not requirements — a check mark just means it's happened this week; a dash isn't a failure, especially on a full week.")}</h2>
-    <div class="barlist">${guidelineRows}</div>
-  </div>
-  <div class="card">
-    <h2>This week vs. your usual rhythm${infoIcon('Reference rhythm: Mon rest, Tue climb, Wed exercise, Thu climb, Fri rest, Sat/Sun climb.')}</h2>
-    <div class="barlist">${tmplRow}</div>
-    ${tmpl.notes.length ? `<p class="small" style="margin-top:10px;color:var(--red);">${tmpl.notes.join(' ')}</p>` : `<p class="small muted" style="margin-top:10px;">Tracking the usual rhythm so far this week.</p>`}
-  </div>
-  <div class="card"><h2>Last 12 weeks</h2><div class="heatgrid">${heat}</div></div>
-  <div class="card"><h2>Minutes, last 14 days</h2><div class="barlist">${minBars}</div></div>
-  <div class="card"><h2>Focus area attention</h2><div class="barlist">${focusBars}</div></div>
   <div class="card"><h2>Weak-point check-ins</h2>${assessRows}</div>
   <div class="card"><h2>Entries</h2>${entryRows}</div>`;
 }
@@ -1680,6 +1775,10 @@ function renderHistory(){
 function renderSettings(){
   const s = App.settings;
   return `
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+    <h2 style="margin-bottom:0;font-family:'Big Shoulders Display',sans-serif;font-size:1.3rem;">Settings</h2>
+    <button class="btn btn-ghost" style="width:auto;padding:7px 14px;" onclick="closeSettings()">Close</button>
+  </div>
   <div class="card">
     <h2>Cycle</h2>
     <div class="field"><label>Framework</label>
@@ -1728,7 +1827,8 @@ function renderSettings(){
     <h2>Anthropic API key${infoIcon("Stored only in this browser's local storage. Never written into this app's code, never sent anywhere but Anthropic's API.")}</h2>
     <div class="field"><input type="password" placeholder="sk-ant-..." value="${escHtml(s.apiKey)}" oninput="App.settings.apiKey=this.value"></div>
   </div>
-  <button class="btn btn-primary" onclick="saveSettingsForm()">Save settings</button>`;
+  <button class="btn btn-primary" onclick="saveSettingsForm()">Save settings</button>
+  ${renderEntriesAndCheckins()}`;
 }
 
 function renderQuestionnaire(){
@@ -1909,7 +2009,7 @@ function submitLog(){
   App.ui.climbsDraft = [];
   App.ui.climbLocationDraft = 'Indoor';
   App.ui.editingId = null;
-  App.setTab('history');
+  App.setTab('home');
 }
 
 function toggleEntry(id){ App.ui.expandedEntry = App.ui.expandedEntry === id ? null : id; App.render(); }
@@ -1933,7 +2033,7 @@ function submitAssessment(){
   App.saveAssessments();
   App.ui.qOpen = false;
   App.toast('Check-in saved');
-  App.setTab('today');
+  App.setTab('home');
 }
 
 // ---- Init ----
@@ -1949,7 +2049,8 @@ App.render();
 window.App = App;
 window.showInfo = showInfo; window.closeInfo = closeInfo;
 window.setTimerPreset = setTimerPreset; window.toggleTimer = toggleTimer; window.resetTimer = resetTimer;
-window.toggleTimerPicker = toggleTimerPicker;
+window.toggleTimerPicker = toggleTimerPicker; window.TIMER_PRESETS = TIMER_PRESETS;
+window.toggleStopwatch = toggleStopwatch; window.resetStopwatch = resetStopwatch;
 window.removePlanLine = removePlanLine; window.movePlanLine = movePlanLine;
 window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
 window.EXERCISE_LIBRARY = EXERCISE_LIBRARY; window.WORKOUT_STYLES = WORKOUT_STYLES;
@@ -1964,6 +2065,7 @@ window.addClimbRow = addClimbRow; window.removeClimbRow = removeClimbRow; window
 window.toggleEntry = toggleEntry; window.setCycleType = setCycleType; window.saveSettingsForm = saveSettingsForm;
 window.setFontSize = setFontSize;
 window.setTheme = setTheme;
+window.openSettings = openSettings; window.closeSettings = closeSettings; window.setHeatmapWeeks = setHeatmapWeeks;
 window.openQuestionnaire = openQuestionnaire; window.closeQuestionnaire = closeQuestionnaire;
 window.setQAnswer = setQAnswer; window.submitAssessment = submitAssessment; window.askClaude = askClaude;
 window.applyPhaseOverride = applyPhaseOverride; window.exportData = exportData; window.importData = importData;
