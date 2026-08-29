@@ -24,11 +24,18 @@ const CORE_MOVEMENT_TYPES = ['Static/isometric','Dynamic/crunches-type'];
 // Reference week — used only as a comparison point, not enforced. Mon/Fri rest, Tue/Thu climb,
 // Wed exercise, Sat+Sun climb (one exercise-focused, one fun-focused).
 const WEEKLY_TEMPLATE = ['Rest','Climb','Exercise','Climb','Rest','Climb','Climb']; // Mon..Sun
+// Taper is intentionally a different shape — a light touch or two early in the week, then rest
+// through the end, matching the Taper phase guidance text below. Comparing a taper week against
+// the normal-training-week template would flag the whole week as "off," when going quiet is the point.
+const TAPER_TEMPLATE = ['Climb','Rest','Climb','Rest','Rest','Rest','Rest'];
 const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
 // Rough weekly minute targets used only to scale the radar chart — adjustable, not gospel.
 // Axes match the loggable session types exactly.
 const WEEKLY_TARGETS = { climb:150, fingers:40, strength:40, antag:50, core:40, flexibility:30, mobility:30, cardio:40 };
+// Taper targets are deliberately a fraction of normal — hitting the usual weekly volume during a
+// taper week isn't the goal, so scoring against the same bar would just look like a bad week.
+const TAPER_WEEKLY_TARGETS = { climb:50, fingers:20, strength:10, antag:10, core:10, flexibility:15, mobility:15, cardio:10 };
 const RADAR_AXES = [
   {key:'climb', label:'Climbing'}, {key:'fingers', label:'Fingers'}, {key:'strength', label:'Strength'},
   {key:'antag', label:'Antagonist'}, {key:'core', label:'Core'}, {key:'flexibility', label:'Flexibility'},
@@ -187,7 +194,7 @@ const PHASE_GUIDANCE = {
   'Skill & Stamina': "High-volume, mostly submaximal climbing to build technique, movement skill, and aerobic capacity. Keep most climbing well below max difficulty — avoid grinding on near-limit problems this phase. Roughly: 10-20 min warmup+mobility, 60-120+ min of varied submaximal climbing (build toward high vertical footage, only light-moderate pump), light strength/core work, cooldown.",
   'Max Strength & Power': "Lower-volume, high-intensity: near-limit bouldering and short, powerful efforts. Roughly: 15-25 min warmup+mobility, 30-60 min near-limit/hypergravity bouldering, 20-30 min finger-strength work (hangboard), 10-20 min pull-power work, 15-25 min core, 10-40 min antagonist/stabilizer + posterior chain (fine as a separate day), cooldown.",
   'Power-Endurance': "Moderate-high intensity with short rest, building the ability to climb pumped without falling apart. Roughly: 20-30 min progressive warmup, 30-60 min interval-style climbing (e.g. 4x4s or a similar sustained/pumpy protocol), 15-20 min finger strength-endurance, 10-20 min pull-muscle endurance, 15-25 min core, 20-40 min antagonist/posterior chain (fine as a separate day), cooldown.",
-  'Taper': "Sharp drop in volume so the previous weeks' adaptations show up. Short sessions (20-40 min), one or two brief high-intensity touches early in the week, full rest days by the end. No new fatigue.",
+  'Taper': "Sharp drop in volume so the previous weeks' adaptations show up. Short sessions (20-40 min), one or two brief high-intensity touches early in the week, full rest days by the end. No new fatigue. Those brief touches should be climbing plus a small dose of finger maintenance — a couple of easy hangs, not a hangboard session — since contact strength is the most perishable quality on this short a timescale. Strength, antagonist, and core work should be treated as skippable this week, not just reduced; a week without them costs nothing and frees up recovery for what's actually being peaked.",
 };
 
 const LS = {
@@ -407,11 +414,13 @@ function getWeekDates(anchorISO){
   return out;
 }
 function compareToWeeklyTemplate(entries){
+  const isTaper = getCycleState(App.settings).phaseName === 'Taper';
+  const template = isTaper ? TAPER_TEMPLATE : WEEKLY_TEMPLATE;
   const dates = getWeekDates(todayISO());
   const byDate = aggregateByDay(entries);
   const today = todayISO();
   const rows = dates.map((date, i) => ({
-    day: DAY_NAMES[i], date, template: WEEKLY_TEMPLATE[i],
+    day: DAY_NAMES[i], date, template: template[i],
     actual: date <= today ? classifyDay(byDate[date]) : null, // don't judge days that haven't happened
     isFuture: date > today,
   }));
@@ -424,18 +433,20 @@ function compareToWeeklyTemplate(entries){
   const climbDaysSoFar = rows.filter(r=>!r.isFuture && r.actual==='Climb').length;
   const restDaysSoFar = rows.filter(r=>!r.isFuture && r.actual==='Rest').length;
   const daysSoFar = rows.filter(r=>!r.isFuture).length;
-  return { rows, notes, climbDaysSoFar, restDaysSoFar, daysSoFar };
+  return { rows, notes, climbDaysSoFar, restDaysSoFar, daysSoFar, isTaper };
 }
 
 // ---- Radar data ----
 function computeWeeklyRadarData(entries){
+  const isTaper = getCycleState(App.settings).phaseName === 'Taper';
+  const targets = isTaper ? TAPER_WEEKLY_TARGETS : WEEKLY_TARGETS;
   const days = dayList(entries).filter(d => {
     const daysAgo = Math.round((new Date(todayISO()) - new Date(d.date)) / 86400000);
     return daysAgo >= 0 && daysAgo < 7;
   });
   const sums = { climb:0, fingers:0, strength:0, antag:0, core:0, flexibility:0, mobility:0, cardio:0 };
   days.forEach(d => { Object.keys(sums).forEach(k => { sums[k] += d['time'+k[0].toUpperCase()+k.slice(1)] || 0; }); });
-  return RADAR_AXES.map(a => ({ axis: a.label, pct: Math.min(150, Math.round((sums[a.key] / WEEKLY_TARGETS[a.key]) * 100)) }));
+  return RADAR_AXES.map(a => ({ axis: a.label, pct: Math.min(150, Math.round((sums[a.key] / targets[a.key]) * 100)) }));
 }
 
 // Your own guidelines, checked against the trailing 7 days. Framed as a gentle check-in, not a
@@ -533,9 +544,11 @@ function detectPatterns(entries){
     flags.push("No mobility/stretch work logged yet — worth adding on a non-climbing day.");
   }
 
-  // training frequency: fewer than 3 active (non-rest) days in the trailing 7
+  // training frequency: fewer than 3 active (non-rest) days in the trailing 7 — not meaningful
+  // during a taper week, where going quiet is the entire point rather than a gap to flag
+  const isTaperWeek = getCycleState(App.settings).phaseName === 'Taper';
   const activeDays7 = last7Days.filter(d => classifyDay(d) !== 'Rest').length;
-  if (last7Days.length >= 4 && activeDays7 < 3) {
+  if (!isTaperWeek && last7Days.length >= 4 && activeDays7 < 3) {
     flags.push("Only " + activeDays7 + " active day(s) logged in the last 7 — light week, or just under-logged?");
   }
 
@@ -582,6 +595,13 @@ function computeBriefing(entries){
 }
 function renderBriefingCard(entries){
   if (entries.length < 3) return ''; // not enough data yet to say anything meaningful
+  const isTaper = getCycleState(App.settings).phaseName === 'Taper';
+  if (isTaper) {
+    return `<div class="card">
+      <h2>Training briefing${infoIcon('Where you stand on your weekly guidelines — not a plan, just a status check.')}</h2>
+      <p class="small muted">You're in a taper week — reduced volume across the board is the goal, not a gap to fill. Weekly guideline tracking picks back up next phase.</p>
+    </div>`;
+  }
   const b = computeBriefing(entries);
   return `<div class="card">
     <h2>Training briefing${infoIcon('Where you stand on your weekly guidelines — not a plan, just a status check.')}</h2>
@@ -1576,9 +1596,11 @@ function renderHome(){
     <div class="barlist">${minBars}</div>
   </div>
   <div class="card">
-    <h2>This week vs. your usual rhythm${infoIcon('Reference rhythm: Mon rest, Tue climb, Wed exercise, Thu climb, Fri rest, Sat/Sun climb.')}</h2>
+    <h2>This week vs. ${tmpl.isTaper ? 'your taper-week shape' : 'your usual rhythm'}${infoIcon(tmpl.isTaper
+      ? 'Taper reference: light touches Mon and Wed, full rest the rest of the week — a different shape than a normal training week on purpose.'
+      : 'Reference rhythm: Mon rest, Tue climb, Wed exercise, Thu climb, Fri rest, Sat/Sun climb.')}</h2>
     <div class="barlist">${tmplRow}</div>
-    ${tmpl.notes.length ? `<p class="small" style="margin-top:10px;color:var(--red);">${tmpl.notes.join(' ')}</p>` : `<p class="small muted" style="margin-top:10px;">Tracking the usual rhythm so far this week.</p>`}
+    ${tmpl.notes.length ? `<p class="small" style="margin-top:10px;color:var(--red);">${tmpl.notes.join(' ')}</p>` : `<p class="small muted" style="margin-top:10px;">${tmpl.isTaper ? 'Tracking the taper shape so far this week.' : 'Tracking the usual rhythm so far this week.'}</p>`}
   </div>
   <div class="card">
     <h2>Focus area attention${infoIcon('Relative to whichever area has gotten the most attention across everything logged — not just the trailing week.')}</h2>
