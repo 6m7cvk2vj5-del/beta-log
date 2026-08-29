@@ -206,7 +206,7 @@ const App = {
         qDraft: {}, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planText:'',
         editingId:null, planFeedback:'', lastPlanContext:null, showAdherence:false, planAdherencePick:'',
         importLoading:false, importError:'', infoPopup:null,
-        timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false },
+        timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false, expanded:false },
         stopwatch: { elapsedSeconds:0, running:false, intervalId:null } },
 
   load() {
@@ -1317,6 +1317,7 @@ function formatMMSS(totalSeconds){
 }
 function renderTimerWidget(){
   const t = App.ui.timer, sw = App.ui.stopwatch;
+  if (t.expanded) return renderTimerExpanded();
   const r = 22, circumference = 2 * Math.PI * r;
   const frac = t.totalSeconds > 0 ? t.remainingSeconds / t.totalSeconds : 0;
   const offset = circumference * (1 - frac);
@@ -1332,6 +1333,7 @@ function renderTimerWidget(){
       </button>
       <button class="btn btn-primary" style="width:auto;padding:9px 16px;flex:none;" id="timerToggleBtn" onclick="toggleTimer()">${t.running ? 'Pause' : (t.remainingSeconds < t.totalSeconds && t.remainingSeconds > 0 ? 'Resume' : 'Start')}</button>
       <button class="btn btn-ghost" style="width:auto;padding:9px 12px;flex:none;" onclick="resetTimer()">Reset</button>
+      <button class="btn btn-ghost" style="width:auto;padding:9px 10px;flex:none;" onclick="toggleTimerExpanded()" title="Make bigger">&#x26F6;</button>
     </div>
     ${t.pickerOpen ? `<div class="timer-presets">
       ${TIMER_PRESETS.map(s=>`<button class="pill sm${t.totalSeconds===s?' active':''}" onclick="setTimerPreset(${s})">${formatPresetLabel(s)}</button>`).join('')}
@@ -1344,7 +1346,42 @@ function renderTimerWidget(){
     </div>
   </div>`;
 }
+function renderTimerExpanded(){
+  const t = App.ui.timer, sw = App.ui.stopwatch;
+  const r = 100, circumference = 2 * Math.PI * r;
+  const frac = t.totalSeconds > 0 ? t.remainingSeconds / t.totalSeconds : 0;
+  const offset = circumference * (1 - frac);
+  return `<div class="timer-expanded-overlay">
+    <div class="timer-expanded-box">
+      <button class="close-x" style="position:absolute;top:14px;right:14px;" onclick="toggleTimerExpanded()" title="Shrink">&times;</button>
+      <button type="button" class="timer-dial-btn" onclick="toggleTimerPicker()" title="Choose time">
+        <svg width="230" height="230" viewBox="0 0 230 230">
+          <circle cx="115" cy="115" r="${r}" fill="none" stroke="var(--border)" stroke-width="10"/>
+          <circle id="timerRing" cx="115" cy="115" r="${r}" fill="none" stroke="${t.remainingSeconds===0?'var(--red)':'var(--gold)'}" stroke-width="10"
+            stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" stroke-linecap="round" transform="rotate(-90 115 115)" style="transition:stroke-dashoffset 1s linear;"/>
+          <text id="timerNum" x="115" y="130" text-anchor="middle" font-size="46" fill="var(--text)" font-family="'Big Shoulders Display',sans-serif" font-weight="700">${formatMMSS(t.remainingSeconds)}</text>
+        </svg>
+      </button>
+      ${t.pickerOpen ? `<div class="timer-presets" style="justify-content:center;">
+        ${TIMER_PRESETS.map(s=>`<button class="pill${t.totalSeconds===s?' active':''}" onclick="setTimerPreset(${s})">${formatPresetLabel(s)}</button>`).join('')}
+      </div>` : ''}
+      <div class="timer-expanded-controls">
+        <button class="btn btn-primary" style="width:auto;padding:16px 32px;font-size:1.05rem;" id="timerToggleBtn" onclick="toggleTimer()">${t.running ? 'Pause' : (t.remainingSeconds < t.totalSeconds && t.remainingSeconds > 0 ? 'Resume' : 'Start')}</button>
+        <button class="btn btn-ghost" style="width:auto;padding:16px 24px;font-size:1.05rem;" onclick="resetTimer()">Reset</button>
+      </div>
+      <div class="timer-expanded-stopwatch">
+        <div class="stopwatch-label">Stopwatch</div>
+        <div id="stopwatchNum" class="stopwatch-num-big">${formatMMSS(sw.elapsedSeconds)}</div>
+        <div class="timer-expanded-controls" style="margin-top:10px;">
+          <button class="btn btn-ghost" style="width:auto;padding:12px 24px;" id="stopwatchToggleBtn" onclick="toggleStopwatch()">${sw.running ? 'Pause' : (sw.elapsedSeconds > 0 ? 'Resume' : 'Start')}</button>
+          <button class="btn btn-ghost" style="width:auto;padding:12px 20px;" onclick="resetStopwatch()">Reset</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
 function toggleTimerPicker(){ App.ui.timer.pickerOpen = !App.ui.timer.pickerOpen; App.render(); }
+function toggleTimerExpanded(){ App.ui.timer.expanded = !App.ui.timer.expanded; App.render(); }
 function setTimerPreset(seconds){
   pauseTimerInterval();
   App.ui.timer.totalSeconds = seconds;
@@ -1378,7 +1415,8 @@ function tickTimer(){
   const ring = document.getElementById('timerRing');
   const num = document.getElementById('timerNum');
   if (ring && num) {
-    const r = 24, circumference = 2 * Math.PI * r;
+    const r = Number(ring.getAttribute('r')) || 24; // read the real radius - compact and expanded dials differ in size
+    const circumference = 2 * Math.PI * r;
     const frac = t.totalSeconds > 0 ? t.remainingSeconds / t.totalSeconds : 0;
     ring.setAttribute('stroke-dashoffset', circumference * (1 - frac));
     num.textContent = formatMMSS(t.remainingSeconds);
@@ -1388,7 +1426,7 @@ function tickTimer(){
     pauseTimerInterval();
     t.running = false;
     playTimerBeep();
-    if (navigator.vibrate) navigator.vibrate([200,100,200]);
+    if (navigator.vibrate) navigator.vibrate([300,100,300,100,300]);
     const btn = document.getElementById('timerToggleBtn');
     if (btn) btn.textContent = 'Start';
   }
@@ -1396,14 +1434,15 @@ function tickTimer(){
 function playTimerBeep(){
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    [0, 0.25, 0.5].forEach(delay => {
+    [0, 0.3, 0.6, 0.9, 1.2].forEach(delay => {
       const osc = ctx.createOscillator(), gain = ctx.createGain();
       osc.connect(gain); gain.connect(ctx.destination);
-      osc.frequency.value = 880;
-      gain.gain.setValueAtTime(0.2, ctx.currentTime + delay);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.2);
+      osc.type = 'square'; // more piercing/alarm-like than the default sine, cuts through gym noise better
+      osc.frequency.value = 1000;
+      gain.gain.setValueAtTime(0.35, ctx.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.25);
       osc.start(ctx.currentTime + delay);
-      osc.stop(ctx.currentTime + delay + 0.2);
+      osc.stop(ctx.currentTime + delay + 0.25);
     });
   } catch(e) { /* audio not available — the vibration + visual change still happened */ }
 }
@@ -2101,6 +2140,7 @@ window.App = App;
 window.showInfo = showInfo; window.closeInfo = closeInfo;
 window.setTimerPreset = setTimerPreset; window.toggleTimer = toggleTimer; window.resetTimer = resetTimer;
 window.toggleTimerPicker = toggleTimerPicker; window.TIMER_PRESETS = TIMER_PRESETS;
+window.toggleTimerExpanded = toggleTimerExpanded;
 window.toggleStopwatch = toggleStopwatch; window.resetStopwatch = resetStopwatch;
 window.removePlanLine = removePlanLine; window.movePlanLine = movePlanLine;
 window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
