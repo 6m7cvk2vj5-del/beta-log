@@ -1068,6 +1068,83 @@ function linkifyPlanToHTML(text){
   ).join('\n');
 }
 
+// ---- Shuffle/remove for the live plan on Today. App.ui.planText stays the single source of
+// truth (a plain string) the whole time — every edit reads it, mutates the line array, and writes
+// a plain string straight back, so search/export/share/save-to-log/regenerate all keep working
+// completely unchanged; they have no idea editing happened.
+function classifyPlanLine(line){
+  if (/^\s*#{1,6}\s+\S/.test(line) || /^\s*\*\*[^*]+\*\*\s*$/.test(line)) return 'header';
+  if (/^\s*(?:[-*•]|\d+[.)])\s+\S/.test(line)) return 'exercise';
+  if (!line.trim()) return 'blank';
+  return 'other';
+}
+function cleanupEmptyHeaders(lines){
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (classifyPlanLine(lines[i]) !== 'header') continue;
+    let hasExercise = false;
+    for (let j = i+1; j < lines.length; j++) {
+      const cls = classifyPlanLine(lines[j]);
+      if (cls === 'header') break;
+      if (cls === 'exercise') { hasExercise = true; break; }
+    }
+    if (!hasExercise) lines.splice(i, 1);
+  }
+}
+function collapseBlankRuns(lines){
+  for (let i = lines.length - 1; i > 0; i--) {
+    if (classifyPlanLine(lines[i]) === 'blank' && classifyPlanLine(lines[i-1]) === 'blank') lines.splice(i, 1);
+  }
+}
+function removePlanLine(index){
+  const lines = (App.ui.planText || '').split('\n');
+  lines.splice(index, 1);
+  cleanupEmptyHeaders(lines);
+  collapseBlankRuns(lines);
+  App.ui.planText = lines.join('\n');
+  App.render();
+}
+function movePlanLine(index, direction){
+  const lines = (App.ui.planText || '').split('\n');
+  let j = index + direction;
+  while (j >= 0 && j < lines.length && classifyPlanLine(lines[j]) === 'blank') j += direction;
+  if (j < 0 || j >= lines.length) return; // already at the edge, nothing to swap with
+  const tmp = lines[index]; lines[index] = lines[j]; lines[j] = tmp;
+  App.ui.planText = lines.join('\n');
+  App.render();
+}
+// Editable view of the live plan — exercise lines get search + reorder/remove controls; headers
+// are shown plainly (their literal markdown markers stripped for readability) with no controls of
+// their own, since they disappear on their own once every exercise beneath them is gone.
+function renderPlanEditable(text){
+  if (!text) return '';
+  const lines = text.split('\n');
+  return lines.map((line, i) => {
+    const cls = classifyPlanLine(line);
+    if (cls === 'header') {
+      const clean = line.replace(/^\s*#{1,6}\s+/, '').replace(/\*\*/g, '').trim();
+      return `<div class="plan-header">${escHtml(clean)}</div>`;
+    }
+    if (cls !== 'exercise') return `<div class="plan-plain">${escHtml(line)}</div>`;
+    const bulletMatch = line.match(/^(\s*(?:[-*•]|\d+[.)])\s+)(.*)$/);
+    const prefix = bulletMatch[1];
+    const body = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
+    const sepMatch = body.match(/^(.*?)(:|—|–|,| - )([\s\S]*)$/);
+    const namePart = (sepMatch ? sepMatch[1] : body).trim();
+    const restPart = sepMatch ? sepMatch[2] + sepMatch[3] : '';
+    const nameHtml = namePart
+      ? `<span class="ex-link" onclick="searchExercise('${escAttr(namePart)}')">${escHtml(namePart)}</span>`
+      : '';
+    return `<div class="plan-line">
+      <span class="plan-line-text">${escHtml(prefix)}${nameHtml}${escHtml(restPart)}</span>
+      <span class="plan-line-controls">
+        <button type="button" onclick="movePlanLine(${i},-1)" title="Move up">&uarr;</button>
+        <button type="button" onclick="movePlanLine(${i},1)" title="Move down">&darr;</button>
+        <button type="button" onclick="removePlanLine(${i})" title="Remove">&times;</button>
+      </span>
+    </div>`;
+  }).join('');
+}
+
 App.render = function(){
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === App.ui.tab));
   const panel = document.getElementById('panels');
@@ -1262,8 +1339,8 @@ function renderToday(){
     </div>
     <button class="btn btn-primary" onclick="askClaude()" ${App.ui.planLoading?'disabled':''}>${App.ui.planLoading ? 'Thinking…' : "Get today's plan"}</button>
     ${App.ui.planError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.planError)}</p>` : ''}
-    ${App.ui.planText ? `<div class="plan-box">${renderPlanWithSearchLinks(App.ui.planText)}</div>
-    
+    ${App.ui.planText ? `<div class="plan-editable">${renderPlanEditable(App.ui.planText)}</div>
+    <p class="small muted" style="margin-top:6px;">Tap a name to search it, use the arrows to reorder, &times; to drop it. ${infoIcon("Removing every exercise under a heading also removes the heading. All the export/share/save options below use whatever's currently shown here.")}</p>
     <div class="pillrow" style="margin-top:10px;">
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="sharePlan()">Share / copy text</button>
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="openPlanAsPage()">Open as page (tap-to-search)</button>
@@ -1757,6 +1834,7 @@ App.render();
 window.App = App;
 window.showInfo = showInfo; window.closeInfo = closeInfo;
 window.setTimerPreset = setTimerPreset; window.toggleTimer = toggleTimer; window.resetTimer = resetTimer;
+window.removePlanLine = removePlanLine; window.movePlanLine = movePlanLine;
 window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
 window.EXERCISE_LIBRARY = EXERCISE_LIBRARY; window.WORKOUT_STYLES = WORKOUT_STYLES;
 window.FOCUS_AREAS = FOCUS_AREAS; window.ADHERENCE_OPTIONS = ADHERENCE_OPTIONS;
