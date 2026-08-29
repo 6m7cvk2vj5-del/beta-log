@@ -206,7 +206,7 @@ const App = {
         qDraft: {}, qOpen:false, expandedEntry:null, planLoading:false, planError:'', planText:'',
         editingId:null, planFeedback:'', lastPlanContext:null, showAdherence:false, planAdherencePick:'',
         importLoading:false, importError:'', infoPopup:null,
-        timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null } },
+        timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false } },
 
   load() {
     try { const s = localStorage.getItem(LS.settings); if (s) this.settings = Object.assign(this.settings, JSON.parse(s)); } catch(e){}
@@ -1217,31 +1217,36 @@ function closeInfo(){ App.ui.infoPopup = null; App.render(); }
 const TIMER_PRESETS = [15, 30, 45, 60, 90];
 function renderTimerWidget(){
   const t = App.ui.timer;
-  const r = 24, circumference = 2 * Math.PI * r;
+  const r = 22, circumference = 2 * Math.PI * r;
   const frac = t.totalSeconds > 0 ? t.remainingSeconds / t.totalSeconds : 0;
   const offset = circumference * (1 - frac);
   const mm = Math.floor(t.remainingSeconds / 60), ss = t.remainingSeconds % 60;
   const timeStr = `${mm}:${String(ss).padStart(2,'0')}`;
-  return `<div class="timer-spacer"></div>
-  <div class="timer-bar">
-    <svg width="56" height="56" viewBox="0 0 56 56" style="flex:none;">
-      <circle cx="28" cy="28" r="${r}" fill="none" stroke="var(--border)" stroke-width="4"/>
-      <circle id="timerRing" cx="28" cy="28" r="${r}" fill="none" stroke="${t.remainingSeconds===0?'var(--red)':'var(--gold)'}" stroke-width="4"
-        stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" stroke-linecap="round" transform="rotate(-90 28 28)" style="transition:stroke-dashoffset 1s linear;"/>
-      <text id="timerNum" x="28" y="32" text-anchor="middle" font-size="13" fill="var(--text)" font-family="'IBM Plex Sans',sans-serif">${timeStr}</text>
-    </svg>
-    <div class="timer-presets">
-      ${TIMER_PRESETS.map(s=>`<button class="pill sm${t.totalSeconds===s?' active':''}" onclick="setTimerPreset(${s})">${s}s</button>`).join('')}
+  return `<div class="timer-bar">
+    <div class="timer-row">
+      <button type="button" class="timer-dial-btn" onclick="toggleTimerPicker()" title="Choose time">
+        <svg width="48" height="48" viewBox="0 0 48 48" style="flex:none;">
+          <circle cx="24" cy="24" r="${r}" fill="none" stroke="var(--border)" stroke-width="4"/>
+          <circle id="timerRing" cx="24" cy="24" r="${r}" fill="none" stroke="${t.remainingSeconds===0?'var(--red)':'var(--gold)'}" stroke-width="4"
+            stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" stroke-linecap="round" transform="rotate(-90 24 24)" style="transition:stroke-dashoffset 1s linear;"/>
+          <text id="timerNum" x="24" y="28" text-anchor="middle" font-size="11.5" fill="var(--text)" font-family="'IBM Plex Sans',sans-serif">${timeStr}</text>
+        </svg>
+      </button>
+      <button class="btn btn-primary" style="width:auto;padding:9px 16px;flex:none;" id="timerToggleBtn" onclick="toggleTimer()">${t.running ? 'Pause' : (t.remainingSeconds < t.totalSeconds && t.remainingSeconds > 0 ? 'Resume' : 'Start')}</button>
+      <button class="btn btn-ghost" style="width:auto;padding:9px 12px;flex:none;" onclick="resetTimer()">Reset</button>
     </div>
-    <button class="btn btn-primary" style="width:auto;padding:9px 16px;flex:none;" id="timerToggleBtn" onclick="toggleTimer()">${t.running ? 'Pause' : (t.remainingSeconds < t.totalSeconds && t.remainingSeconds > 0 ? 'Resume' : 'Start')}</button>
-    <button class="btn btn-ghost" style="width:auto;padding:9px 12px;flex:none;" onclick="resetTimer()">Reset</button>
+    ${t.pickerOpen ? `<div class="timer-presets">
+      ${TIMER_PRESETS.map(s=>`<button class="pill sm${t.totalSeconds===s?' active':''}" onclick="setTimerPreset(${s})">${s}s</button>`).join('')}
+    </div>` : ''}
   </div>`;
 }
+function toggleTimerPicker(){ App.ui.timer.pickerOpen = !App.ui.timer.pickerOpen; App.render(); }
 function setTimerPreset(seconds){
   pauseTimerInterval();
   App.ui.timer.totalSeconds = seconds;
   App.ui.timer.remainingSeconds = seconds;
   App.ui.timer.running = false;
+  App.ui.timer.pickerOpen = false; // retract once a choice is made
   App.render();
 }
 function pauseTimerInterval(){
@@ -1389,6 +1394,7 @@ function renderToday(){
     <button class="btn btn-primary" onclick="askClaude()" ${App.ui.planLoading?'disabled':''}>${App.ui.planLoading ? 'Thinking…' : "Get today's plan"}</button>
     ${App.ui.planError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.planError)}</p>` : ''}
     ${App.ui.planText ? `${renderPlanHero(App.ui.planText, d.sessionTypes, d.minutes)}
+    ${renderTimerWidget()}
     <div class="plan-editable">${renderPlanEditable(App.ui.planText)}</div>
     <p class="small muted" style="margin-top:6px;">Tap a name to search it, use the arrows to reorder, &times; to drop it. ${infoIcon("Removing every exercise under a heading also removes the heading. All the export/share/save options below use whatever's currently shown here.")}</p>
     <div class="pillrow" style="margin-top:10px;">
@@ -1410,8 +1416,7 @@ function renderToday(){
       <textarea placeholder="e.g. swap the finger work for more core, I only actually have 30 min, less bouldering today..." oninput="App.ui.planFeedback=this.value; document.getElementById('regenBtn').disabled = !this.value.trim();">${escHtml(App.ui.planFeedback)}</textarea>
       <button id="regenBtn" class="btn btn-secondary" style="margin-top:8px;" onclick="askClaude(App.ui.planFeedback)" ${App.ui.planLoading || !App.ui.planFeedback.trim() ? 'disabled' : ''}>${App.ui.planLoading ? 'Thinking…' : 'Regenerate with this feedback'}</button>
     </div>` : ''}
-  </div>
-  ${renderTimerWidget()}`;
+  </div>`;
 }
 
 function sliderRow(label, field, value, max){
@@ -1884,6 +1889,7 @@ App.render();
 window.App = App;
 window.showInfo = showInfo; window.closeInfo = closeInfo;
 window.setTimerPreset = setTimerPreset; window.toggleTimer = toggleTimer; window.resetTimer = resetTimer;
+window.toggleTimerPicker = toggleTimerPicker;
 window.removePlanLine = removePlanLine; window.movePlanLine = movePlanLine;
 window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
 window.EXERCISE_LIBRARY = EXERCISE_LIBRARY; window.WORKOUT_STYLES = WORKOUT_STYLES;
