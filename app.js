@@ -461,7 +461,7 @@ function renderRadarSVG(data, size){
   return `<svg viewBox="0 0 ${size} ${size}" style="width:100%;max-width:320px;height:auto;display:block;overflow:visible;">
     ${rings}${spokes}
     <polygon points="${targetPts}" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3,3"/>
-    <polygon points="${dataPts}" fill="rgba(204,155,60,.35)" stroke="var(--gold)" stroke-width="2"/>
+    <polygon points="${dataPts}" fill="rgba(158,110,36,.35)" stroke="var(--gold)" stroke-width="2"/>
     ${labels}
   </svg>`;
 }
@@ -619,12 +619,12 @@ function openPlanAsPage(){
   const doc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Beta Log — ${todayISO()}</title>
 <style>
-  body{background:#17161B;color:#EEE9E1;font-family:-apple-system,BlinkMacSystemFont,'IBM Plex Sans',sans-serif;
+  body{background:#F5F3EE;color:#2B281F;font-family:-apple-system,BlinkMacSystemFont,'IBM Plex Sans',sans-serif;
     max-width:600px;margin:0 auto;padding:24px 18px;line-height:1.6;white-space:pre-wrap;font-size:15px;}
-  h1{font-size:20px;color:#CC9B3C;margin-bottom:4px;}
-  p.sub{color:#948F87;font-size:13px;margin-top:0;margin-bottom:20px;}
-  a{color:#CC9B3C;text-decoration:underline;text-decoration-style:dotted;}
-  a:active{color:#4E8C87;}
+  h1{font-size:20px;color:#9E6E24;margin-bottom:4px;}
+  p.sub{color:#645F54;font-size:13px;margin-top:0;margin-bottom:20px;}
+  a{color:#9E6E24;text-decoration:underline;text-decoration-style:dotted;}
+  a:active{color:#3A6D67;}
 </style></head><body>
 <h1>Beta Log — Today's Plan</h1>
 <p class="sub">${todayISO()} &middot; tap any underlined exercise to search it</p>
@@ -669,7 +669,7 @@ function savePlanAsImage(){
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   });
 }
-const COLORS_JS = { bg:'#17161B', gold:'#CC9B3C', text:'#EEE9E1' };
+const COLORS_JS = { bg:'#F5F3EE', gold:'#9E6E24', text:'#2B281F' };
 function setPlanAdherence(v){ App.ui.planAdherencePick = v; App.render(); }
 function showLastPlan(){
   if (!App.lastPlan) return;
@@ -1103,11 +1103,20 @@ function removePlanLine(index){
   App.ui.planText = lines.join('\n');
   App.render();
 }
+function findSectionBounds(lines, index){
+  let start = 0;
+  for (let i = index - 1; i >= 0; i--) { if (classifyPlanLine(lines[i]) === 'header') { start = i + 1; break; } }
+  let end = lines.length - 1;
+  for (let i = index + 1; i < lines.length; i++) { if (classifyPlanLine(lines[i]) === 'header') { end = i - 1; break; } }
+  return { start, end };
+}
 function movePlanLine(index, direction){
   const lines = (App.ui.planText || '').split('\n');
+  if (classifyPlanLine(lines[index]) !== 'exercise') return; // only exercise lines are reorderable
+  const { start, end } = findSectionBounds(lines, index);
   let j = index + direction;
-  while (j >= 0 && j < lines.length && classifyPlanLine(lines[j]) === 'blank') j += direction;
-  if (j < 0 || j >= lines.length) return; // already at the edge, nothing to swap with
+  while (j >= start && j <= end && classifyPlanLine(lines[j]) === 'blank') j += direction;
+  if (j < start || j > end) return; // would cross into another section — blocked, not just skipped
   const tmp = lines[index]; lines[index] = lines[j]; lines[j] = tmp;
   App.ui.planText = lines.join('\n');
   App.render();
@@ -1115,32 +1124,72 @@ function movePlanLine(index, direction){
 // Editable view of the live plan — exercise lines get search + reorder/remove controls; headers
 // are shown plainly (their literal markdown markers stripped for readability) with no controls of
 // their own, since they disappear on their own once every exercise beneath them is gone.
+// A compact, prominent summary shown before the detailed exercise list — what kind of session,
+// how long, how many pieces — so the first thing you see reads like an app screen, not a form result.
+function renderPlanHero(text, sessionTypes, minutes){
+  const lines = (text||'').split('\n');
+  let exerciseCount = 0, sectionCount = 0;
+  lines.forEach(l => { const c = classifyPlanLine(l); if (c==='exercise') exerciseCount++; if (c==='header') sectionCount++; });
+  const typeLabel = (sessionTypes && sessionTypes.length) ? sessionTypes.join(' + ') : 'Workout';
+  return `<div class="plan-hero">
+    <div class="plan-hero-type">${escHtml(typeLabel)}</div>
+    <div class="plan-hero-stats">
+      <span><b>${minutes}</b> min</span>
+      <span class="plan-hero-dot">&middot;</span>
+      <span><b>${sectionCount}</b> section${sectionCount===1?'':'s'}</span>
+      <span class="plan-hero-dot">&middot;</span>
+      <span><b>${exerciseCount}</b> exercise${exerciseCount===1?'':'s'}</span>
+    </div>
+  </div>`;
+}
+// Keyword-based section categorization, used to color-code exercise cards and section headers.
+function categorizeHeader(headerText){
+  const t = headerText.toLowerCase();
+  if (/warm.?up|cool.?down/.test(t)) return 'warmup';
+  if (/climb|boulder|route|drill/.test(t)) return 'climb';
+  if (/\bcore\b/.test(t)) return 'core';
+  if (/strength|power|antagonist|finger|forearm|wrist/.test(t)) return 'strength';
+  if (/mobility|flexibility|stretch|cardio|fascia|roll/.test(t)) return 'mobility';
+  if (/mental/.test(t)) return 'mental';
+  return 'default';
+}
+// Pulls a trailing time mention ("— 10 min") off a header into its own badge chip.
+function parseHeaderParts(clean){
+  const m = clean.match(/^(.*?)[\s—–-]+(\d+\s*(?:min|minutes|sec|seconds))\s*$/i);
+  return m ? { title: m[1].trim(), badge: m[2].trim() } : { title: clean, badge: null };
+}
 function renderPlanEditable(text){
   if (!text) return '';
   const lines = text.split('\n');
+  let category = 'default';
   return lines.map((line, i) => {
     const cls = classifyPlanLine(line);
     if (cls === 'header') {
       const clean = line.replace(/^\s*#{1,6}\s+/, '').replace(/\*\*/g, '').trim();
-      return `<div class="plan-header">${escHtml(clean)}</div>`;
+      category = categorizeHeader(clean);
+      const { title, badge } = parseHeaderParts(clean);
+      return `<div class="plan-section-header" style="border-left-color:var(--cat-${category})">
+        <span class="plan-section-title">${escHtml(title)}</span>
+        ${badge ? `<span class="plan-badge">${escHtml(badge)}</span>` : ''}
+      </div>`;
     }
-    if (cls !== 'exercise') return `<div class="plan-plain">${escHtml(line)}</div>`;
+    if (cls !== 'exercise') return line.trim() ? `<div class="plan-plain">${escHtml(line)}</div>` : '';
     const bulletMatch = line.match(/^(\s*(?:[-*•]|\d+[.)])\s+)(.*)$/);
-    const prefix = bulletMatch[1];
     const body = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
     const sepMatch = body.match(/^(.*?)(:|—|–|,| - )([\s\S]*)$/);
     const namePart = (sepMatch ? sepMatch[1] : body).trim();
-    const restPart = sepMatch ? sepMatch[2] + sepMatch[3] : '';
-    const nameHtml = namePart
-      ? `<span class="ex-link" onclick="searchExercise('${escAttr(namePart)}')">${escHtml(namePart)}</span>`
-      : '';
-    return `<div class="plan-line">
-      <span class="plan-line-text">${escHtml(prefix)}${nameHtml}${escHtml(restPart)}</span>
-      <span class="plan-line-controls">
+    const restPart = sepMatch ? sepMatch[2].replace(/^[:,]\s*|^ - /, '') + sepMatch[3] : '';
+    const nameHtml = namePart ? escHtml(namePart) : escHtml(body);
+    return `<div class="exercise-card" style="border-left-color:var(--cat-${category})">
+      <div class="exercise-card-main">
+        <div class="exercise-card-name">${namePart ? `<span class="ex-link" onclick="searchExercise('${escAttr(namePart)}')">${nameHtml}</span>` : nameHtml}</div>
+        ${restPart.trim() ? `<div class="exercise-card-detail">${escHtml(restPart.trim())}</div>` : ''}
+      </div>
+      <div class="plan-line-controls">
         <button type="button" onclick="movePlanLine(${i},-1)" title="Move up">&uarr;</button>
         <button type="button" onclick="movePlanLine(${i},1)" title="Move down">&darr;</button>
         <button type="button" onclick="removePlanLine(${i})" title="Remove">&times;</button>
-      </span>
+      </div>
     </div>`;
   }).join('');
 }
@@ -1339,7 +1388,8 @@ function renderToday(){
     </div>
     <button class="btn btn-primary" onclick="askClaude()" ${App.ui.planLoading?'disabled':''}>${App.ui.planLoading ? 'Thinking…' : "Get today's plan"}</button>
     ${App.ui.planError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.planError)}</p>` : ''}
-    ${App.ui.planText ? `<div class="plan-editable">${renderPlanEditable(App.ui.planText)}</div>
+    ${App.ui.planText ? `${renderPlanHero(App.ui.planText, d.sessionTypes, d.minutes)}
+    <div class="plan-editable">${renderPlanEditable(App.ui.planText)}</div>
     <p class="small muted" style="margin-top:6px;">Tap a name to search it, use the arrows to reorder, &times; to drop it. ${infoIcon("Removing every exercise under a heading also removes the heading. All the export/share/save options below use whatever's currently shown here.")}</p>
     <div class="pillrow" style="margin-top:10px;">
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="sharePlan()">Share / copy text</button>
@@ -1471,7 +1521,7 @@ function renderHistory(){
   const maxDur = Math.max(1, ...days.map(d=>d.totalMinutes));
   const heat = weeks.map(w => `<div class="heatcol">${w.map(cell=>{
     const inten = cell.d ? Math.max(.18, cell.d.totalMinutes/maxDur) : 0;
-    return `<div class="heatcell" title="${cell.date}${cell.d?' — '+cell.d.totalMinutes+'min':''}" style="background:${cell.d?`rgba(204,155,60,${inten})`:'var(--surface2)'}"></div>`;
+    return `<div class="heatcell" title="${cell.date}${cell.d?' — '+cell.d.totalMinutes+'min':''}" style="background:${cell.d?`rgba(158,110,36,${inten})`:'var(--surface2)'}"></div>`;
   }).join('')}</div>`).join('');
 
   // minutes, last 14 calendar days (one bar per day, combined)
