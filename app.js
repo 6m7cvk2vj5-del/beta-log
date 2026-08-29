@@ -203,9 +203,9 @@ const App = {
   assessments: [],
   lastPlan: null, // the most recently generated plan, persisted so it survives a reload/close
   ui: { tab:'home', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
-        qDraft: {}, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, planLoading:false, planError:'', planText:'',
+        qDraft: {}, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planText:'',
         editingId:null, planFeedback:'', lastPlanContext:null, showAdherence:false, planAdherencePick:'',
-        importLoading:false, importError:'', infoPopup:null, heatmapWeeks:12,
+        importLoading:false, importError:'', infoPopup:null,
         timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false },
         stopwatch: { elapsedSeconds:0, running:false, intervalId:null } },
 
@@ -729,6 +729,13 @@ async function extractWorkoutData(text){
   const sys = "You extract structured climbing-training data from free text into a fixed JSON schema. " +
     "Respond with ONLY the JSON object — no markdown fences, no preamble, no commentary. Use null, an empty " +
     "array, or 0 for anything not actually present in the text — never invent or guess at data that isn't there. " +
+    "The 'type' field is a single best-fit label for the overall entry, but the time fields (timeClimb, " +
+    "timeFingers, timeStrength, timeAntag, timeCore, timeFlexibility, timeMobility, timeCardio) are independent " +
+    "of it — assess each one on its own merits from what the exercises actually are, don't dump all the minutes " +
+    "into whichever bucket matches 'type' just because that's the label you picked. A session covering both core " +
+    "and antagonist/stabilizer work should end up with real minutes in both timeCore and timeAntag even though " +
+    "'type' can only hold one of those two labels — look at each named exercise and decide which bucket(s) it " +
+    "actually belongs to, then split or assign the time accordingly, rather than crediting only the primary type. " +
     "Schema:\n" + schema;
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -1471,33 +1478,27 @@ function renderHome(){
   const climbDayCount = days.filter(d => classifyDay(d)==='Climb').length;
   const sinceAssessment = climbingSessionsSinceLastAssessment();
 
-  // heatmap — keyed by day-aggregate so a 3-entry day still shows as one cell; range is selectable
-  const map = {}; days.forEach(d => { map[d.date] = d; });
-  const totalDays = App.ui.heatmapWeeks * 7;
-  const cal = [];
-  const today = new Date(todayISO()+'T00:00:00');
-  for (let i=totalDays-1;i>=0;i--){ const dd=new Date(today); dd.setDate(dd.getDate()-i); const iso=toLocalISO(dd); cal.push({date:iso, d:map[iso]||null}); }
-  const weeks = []; for (let i=0;i<cal.length;i+=7) weeks.push(cal.slice(i,i+7));
-  const maxDur = Math.max(1, ...days.map(d=>d.totalMinutes));
-  const heat = weeks.map(w => `<div class="heatcol">${w.map(cell=>{
-    const inten = cell.d ? Math.max(.18, cell.d.totalMinutes/maxDur) : 0;
-    return `<div class="heatcell" title="${cell.date}${cell.d?' — '+cell.d.totalMinutes+'min':''}" style="background:${cell.d?`rgba(${themeGoldRGB()},${inten})`:'var(--surface2)'}"></div>`;
-  }).join('')}</div>`).join('');
-
-  // minutes, last 14 calendar days (one bar per day, combined) — kept separate from the rhythm view
+  // minutes, last 14 calendar days — stacked by category so you can see what was actually hit,
+  // not just how much time in total. Kept separate from the rhythm view below.
   const last14 = days.slice(0,14).reverse();
   const maxMin14 = Math.max(1, ...last14.map(d=>d.totalMinutes));
-  const minBars = last14.map(d => `<div class="bar-row"><div class="bar-label">${d.date.slice(5)}</div>
-    <div class="bar-track"><div class="bar-fill" style="width:${d.totalMinutes/maxMin14*100}%"></div></div>
-    <div class="bar-val">${d.totalMinutes}</div></div>`).join('');
+  const usedBuckets = new Set();
+  last14.forEach(d => Object.keys(TIME_BUCKET_COLORS).forEach(k => { if (d[k] > 0) usedBuckets.add(k); }));
+  const legend = [...usedBuckets].map(k => `<span><i style="background:${TIME_BUCKET_COLORS[k]}"></i>${TIME_BUCKET_LABELS[k]}</span>`).join('');
+  const minBars = last14.map(d => {
+    const segs = Object.keys(TIME_BUCKET_COLORS).filter(k => d[k] > 0)
+      .map(k => `<div style="width:${d[k]/maxMin14*100}%;background:${TIME_BUCKET_COLORS[k]};" title="${TIME_BUCKET_LABELS[k]}: ${d[k]}min"></div>`).join('');
+    return `<div class="bar-row"><div class="bar-label">${d.date.slice(5)}</div>
+    <div class="bar-track-stacked">${segs}</div>
+    <div class="bar-val">${d.totalMinutes}</div></div>`;
+  }).join('');
 
-  // focus area frequency (by day, so a focus worked 3x same day still counts once)
-  const counts = {}; FOCUS_AREAS.forEach(a=>counts[a]=0);
-  days.forEach(d => d.focus.forEach(a=>{counts[a]=(counts[a]||0)+1;}));
-  const maxCount = Math.max(1, ...Object.values(counts));
-  const focusBars = FOCUS_AREAS.map(a => `<div class="bar-row"><div class="bar-label">${a}</div>
-    <div class="bar-track"><div class="bar-fill" style="width:${counts[a]/maxCount*100}%"></div></div>
-    <div class="bar-val">${counts[a]}</div></div>`).join('');
+  // focus area attention as a radar — relative to whichever area has gotten the most attention,
+  // over all logged time (not just the trailing week, unlike the weekly-balance radar above)
+  const focusCounts = {}; FOCUS_AREAS.forEach(a=>focusCounts[a]=0);
+  days.forEach(d => d.focus.forEach(a=>{focusCounts[a]=(focusCounts[a]||0)+1;}));
+  const maxFocusCount = Math.max(1, ...Object.values(focusCounts));
+  const focusRadarData = FOCUS_AREAS.map(a => ({ axis: a, pct: Math.round(focusCounts[a]/maxFocusCount*100) }));
 
   // weekly balance radar + template comparison
   const radarData = computeWeeklyRadarData(entries);
@@ -1530,23 +1531,43 @@ function renderHome(){
     <h2>Weekly balance${infoIcon('Trailing 7 days vs. rough weekly targets. Dashed ring = target; gold = you.')}</h2>
     <div style="display:flex;justify-content:center;">${renderRadarSVG(radarData)}</div>
   </div>
-  <div class="card"><h2>Minutes, last 14 days</h2><div class="barlist">${minBars}</div></div>
+  <div class="card">
+    <h2>Minutes, last 14 days</h2>
+    <div class="chart-legend" style="margin-top:8px;">${legend}</div>
+    <div class="barlist">${minBars}</div>
+  </div>
   <div class="card">
     <h2>This week vs. your usual rhythm${infoIcon('Reference rhythm: Mon rest, Tue climb, Wed exercise, Thu climb, Fri rest, Sat/Sun climb.')}</h2>
     <div class="barlist">${tmplRow}</div>
     ${tmpl.notes.length ? `<p class="small" style="margin-top:10px;color:var(--red);">${tmpl.notes.join(' ')}</p>` : `<p class="small muted" style="margin-top:10px;">Tracking the usual rhythm so far this week.</p>`}
   </div>
   <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <h2 style="margin-bottom:0;">Last ${App.ui.heatmapWeeks} weeks</h2>
-      <select style="width:auto;padding:6px 10px;font-size:0.8rem;" onchange="setHeatmapWeeks(this.value)">
-        ${[4,8,12,26].map(w=>`<option value="${w}" ${App.ui.heatmapWeeks===w?'selected':''}>${w} weeks</option>`).join('')}
-      </select>
-    </div>
-    <div class="heatgrid" style="margin-top:10px;">${heat}</div>
-  </div>
-  <div class="card"><h2>Focus area attention</h2><div class="barlist">${focusBars}</div></div>`;
+    <h2>Focus area attention${infoIcon('Relative to whichever area has gotten the most attention across everything logged — not just the trailing week.')}</h2>
+    <div style="display:flex;justify-content:center;">${renderRadarSVG(focusRadarData)}</div>
+  </div>`;
 }
+
+function renderLaggingCard(){
+  const flags = detectPatterns(App.entries);
+  const weak = getWeakPointProfile();
+  const missed = computeWeeklyGuidelines(App.entries).filter(g=>!g.ok).map(g=>g.label);
+  if (!flags.length && !weak.categoryRank && !missed.length && !weak.leastWorked.length) return '';
+  const open = App.ui.laggingOpen;
+  const catLabels = {mental:'Mental', technique:'Technique', physical:'Physical'};
+  return `<div class="card">
+    <button type="button" onclick="toggleLagging()" style="background:none;border:none;padding:0;width:100%;display:flex;justify-content:space-between;align-items:center;cursor:pointer;color:var(--text);">
+      <h2 style="margin-bottom:0;">What's been lagging</h2>
+      <span class="small muted">${open?'&#9650;':'&#9660;'}</span>
+    </button>
+    ${open ? `<div style="margin-top:10px;">
+      ${flags.map(f=>`<p class="small" style="margin:4px 0;">${escHtml(f)}</p>`).join('')}
+      ${weak.categoryRank ? `<p class="small" style="margin:4px 0;">Weakest self-assessment category: <b>${escHtml(catLabels[weak.categoryRank[0][0]]||weak.categoryRank[0][0])}</b>.</p>` : ''}
+      ${weak.leastWorked.length ? `<p class="small" style="margin:4px 0;">Least-practiced focus areas: <b>${escHtml(weak.leastWorked.join(', '))}</b>.</p>` : ''}
+      ${missed.length ? `<p class="small" style="margin:4px 0;">Not yet this week: <b>${escHtml(missed.join(', '))}</b>.</p>` : ''}
+    </div>` : ''}
+  </div>`;
+}
+function toggleLagging(){ App.ui.laggingOpen = !App.ui.laggingOpen; App.render(); }
 
 function renderAsk(){
   if (!App.settings.cycleStartDate) {
@@ -1556,6 +1577,7 @@ function renderAsk(){
   const weak = getWeakPointProfile();
   const weakOptionLabel = weak.categoryRank ? `Weakest area: ${weak.categoryRank[0][0]}` : null;
   return `
+  ${renderLaggingCard()}
   <div class="card">
     <h2>Ask for today's plan</h2>
     <div class="field" style="margin-top:14px;"><label>Minutes available: <b id="slider_askMinutes_val">${d.minutes}</b> min</label>
@@ -1641,7 +1663,6 @@ function renderPlan(){
   </div>
   <div class="timer-spacer"></div>`;
 }
-function setHeatmapWeeks(w){ App.ui.heatmapWeeks = Number(w); App.render(); }
 
 function sliderRow(label, field, value, max){
   max = max || 120;
@@ -1761,10 +1782,30 @@ function renderEntriesAndCheckins(){
       </div>` : ''}
     </div>`).join('') || '<p class="small muted">No entries yet.</p>';
 
+  const catLabels = {mental:'Mental', technique:'Technique', physical:'Physical'};
   const assessRows = App.assessments.slice().reverse().map(a => {
     const ranked = Object.entries(a.scores).sort((x,y)=>x[1]-y[1]);
-    return `<div class="entry"><div class="entry-body"><p><b>${a.date}</b> &middot; indoor: ${a.gradeIndoor||'—'} &middot; outdoor: ${a.gradeOutdoor||'—'}</p>
-      <p class="small muted">Weakest: ${ranked[0][0]} (${ranked[0][1].toFixed(1)}) &middot; Strongest: ${ranked[2][0]} (${ranked[2][1].toFixed(1)})</p></div></div>`;
+    const expanded = App.ui.expandedAssessment === a.id;
+    const scoreRows = ranked.map(([cat,score]) => `<div class="bar-row"><div class="bar-label">${catLabels[cat]||cat}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${score/5*100}%"></div></div>
+      <div class="bar-val">${score.toFixed(1)}</div></div>`).join('');
+    const weakPoints = (a.answers||[]).map((score,i) => ({score, q: QUESTIONS[i]}))
+      .filter(x => x.q && x.score <= 2).sort((x,y)=>x.score-y.score).slice(0,5);
+    return `<div class="entry">
+      <button class="entry-head" onclick="toggleAssessment('${a.id}')">
+        <span><b>${a.date}</b> &nbsp;<span class="muted">indoor: ${a.gradeIndoor||'—'} &middot; outdoor: ${a.gradeOutdoor||'—'}</span></span>
+        <span>${expanded?'▲':'▼'}</span>
+      </button>
+      <div class="entry-body">
+        <p class="small muted">Weakest: ${catLabels[ranked[0][0]]||ranked[0][0]} (${ranked[0][1].toFixed(1)}) &middot; Strongest: ${catLabels[ranked[2][0]]||ranked[2][0]} (${ranked[2][1].toFixed(1)})</p>
+        ${expanded ? `
+        <div class="barlist" style="margin-top:8px;">${scoreRows}</div>
+        ${weakPoints.length ? `<p class="small muted" style="margin-top:10px;margin-bottom:4px;">Specific points that scored low:</p>
+          ${weakPoints.map(w=>`<p class="small" style="margin:3px 0;">${escHtml(w.q.t)}</p>`).join('')}`
+          : '<p class="small muted" style="margin-top:10px;">Nothing scored particularly low this check-in.</p>'}
+        ` : ''}
+      </div>
+    </div>`;
   }).join('') || '<p class="small muted">No check-ins taken yet.</p>';
 
   return `
@@ -1976,6 +2017,15 @@ function cancelEdit(){
   App.render();
 }
 const TIME_FIELDS = ['timeClimb','timeFingers','timeStrength','timeAntag','timeCore','timeFlexibility','timeMobility','timeCardio'];
+const TIME_BUCKET_COLORS = {
+  timeClimb:'var(--cat-climb)', timeFingers:'var(--cat-fingers)', timeStrength:'var(--cat-strength)',
+  timeAntag:'var(--cat-antag)', timeCore:'var(--cat-core)', timeFlexibility:'var(--cat-flexibility)',
+  timeMobility:'var(--cat-mobility)', timeCardio:'var(--cat-cardio)',
+};
+const TIME_BUCKET_LABELS = {
+  timeClimb:'Climbing', timeFingers:'Fingers', timeStrength:'Strength', timeAntag:'Antagonist',
+  timeCore:'Core', timeFlexibility:'Flexibility', timeMobility:'Mobility', timeCardio:'Cardio',
+};
 function submitLog(){
   const d = App.ui.logDraft;
   const entry = Object.assign({}, d, { id: App.ui.editingId || uid(), climbs: App.ui.climbsDraft.slice() });
@@ -2013,6 +2063,7 @@ function submitLog(){
 }
 
 function toggleEntry(id){ App.ui.expandedEntry = App.ui.expandedEntry === id ? null : id; App.render(); }
+function toggleAssessment(id){ App.ui.expandedAssessment = App.ui.expandedAssessment === id ? null : id; App.render(); }
 
 function setCycleType(t){ App.settings.cycleType = t; App.render(); }
 function setFontSize(v){ App.settings.fontSize = v.toLowerCase(); App.applyFontSize(); App.saveSettings(); App.render(); }
@@ -2062,10 +2113,10 @@ window.toggleLogFocus = toggleLogFocus; window.toggleLogWall = toggleLogWall; wi
 window.toggleLogDayType = toggleLogDayType; window.toggleLogFailurePoint = toggleLogFailurePoint;
 window.setClimbLocation = setClimbLocation;
 window.addClimbRow = addClimbRow; window.removeClimbRow = removeClimbRow; window.submitLog = submitLog;
-window.toggleEntry = toggleEntry; window.setCycleType = setCycleType; window.saveSettingsForm = saveSettingsForm;
+window.toggleEntry = toggleEntry; window.toggleAssessment = toggleAssessment; window.toggleLagging = toggleLagging; window.setCycleType = setCycleType; window.saveSettingsForm = saveSettingsForm;
 window.setFontSize = setFontSize;
 window.setTheme = setTheme;
-window.openSettings = openSettings; window.closeSettings = closeSettings; window.setHeatmapWeeks = setHeatmapWeeks;
+window.openSettings = openSettings; window.closeSettings = closeSettings;
 window.openQuestionnaire = openQuestionnaire; window.closeQuestionnaire = closeQuestionnaire;
 window.setQAnswer = setQAnswer; window.submitAssessment = submitAssessment; window.askClaude = askClaude;
 window.applyPhaseOverride = applyPhaseOverride; window.exportData = exportData; window.importData = importData;
