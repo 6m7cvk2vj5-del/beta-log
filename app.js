@@ -207,12 +207,13 @@ const LS = {
 const App = {
   settings: { apiKey:'', cycleType:'3-2-1', cycleStartDate: todayISO(), gradeIndoor:'', gradeOutdoor:'', fontSize:'medium', theme:'light' },
   entries: [],
+  _entriesVersion: 0, // bumped by saveEntries(); invalidates the day-aggregation caches
   assessments: [],
   lastPlan: null, // the most recently generated plan, persisted so it survives a reload/close
   ui: { tab:'home', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
         qDraft: {}, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planText:'',
         editingId:null, planFeedback:'', lastPlanContext:null, showAdherence:false, planAdherencePick:'',
-        importLoading:false, importError:'', infoPopup:null,
+        importLoading:false, importError:'', infoPopup:null, entriesShown:50, streaming:false, doneExercises: new Set(), importPanelOpen:false, logMoreOpen:false,
         timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false, expanded:false },
         stopwatch: { elapsedSeconds:0, running:false, intervalId:null } },
 
@@ -252,6 +253,7 @@ const App = {
     if (migratedEntries) this.saveEntries();
     this.applyFontSize();
     this.applyTheme();
+    this._entriesVersion++; // entries were replaced/migrated wholesale here, not via saveEntries()
   },
   applyFontSize() {
     const px = { small: 14, medium: 16, large: 19 }[this.settings.fontSize] || 16;
@@ -262,7 +264,7 @@ const App = {
     else document.documentElement.removeAttribute('data-theme');
   },
   saveSettings() { localStorage.setItem(LS.settings, JSON.stringify(this.settings)); },
-  saveEntries() { localStorage.setItem(LS.entries, JSON.stringify(this.entries)); },
+  saveEntries() { this._entriesVersion++; localStorage.setItem(LS.entries, JSON.stringify(this.entries)); },
   saveAssessments() { localStorage.setItem(LS.assessments, JSON.stringify(this.assessments)); },
   saveLastPlan(text, sessionTypes) {
     this.lastPlan = { text, generatedAt: new Date().toISOString(), sessionTypes: sessionTypes || [] };
@@ -364,7 +366,14 @@ function applyPhaseOverride(){
 // ---- Day aggregation: multiple entries on one date collapse into one "day" record.
 // This is the single source of truth for anything that counts days (streaks, charts, patterns) —
 // logging stretching + antagonist + a climb on the same date is one day, not three.
+// Day-aggregation is the hot path — Home alone asked for it 8 separate times per render (radar,
+// briefing, patterns, template comparison, stats each rebuilding the same structure from scratch).
+// Cached against the entries array identity plus a bump counter that saveEntries() increments, so
+// any mutation invalidates it while repeated reads within one render are free.
+let _aggCache = null, _aggCacheKey = null;
 function aggregateByDay(entries){
+  const key = entries === App.entries ? 'app:' + App._entriesVersion : null;
+  if (key !== null && _aggCacheKey === key && _aggCache) return _aggCache;
   const byDate = {};
   entries.forEach(e => {
     const d = byDate[e.date] || {
@@ -388,12 +397,21 @@ function aggregateByDay(entries){
     d.entries.push(e);
     byDate[e.date] = d;
   });
+  if (key !== null) { _aggCache = byDate; _aggCacheKey = key; }
   return byDate;
 }
+let _dayListCache = null, _dayListCacheKey = null;
 function dayList(entries){
-  return Object.values(aggregateByDay(entries)).sort((a,b)=> b.date.localeCompare(a.date));
+  const key = entries === App.entries ? 'app:' + App._entriesVersion : null;
+  if (key !== null && _dayListCacheKey === key && _dayListCache) return _dayListCache;
+  const list = Object.values(aggregateByDay(entries)).sort((a,b)=> b.date.localeCompare(a.date));
+  if (key !== null) { _dayListCache = list; _dayListCacheKey = key; }
+  return list;
 }
 // Classifies a day for the weekly-template comparison: Climbing beats Exercise beats Rest.
+// Days between a YYYY-MM-DD string and a precomputed "today" timestamp. Callers pass todayMs in
+// so it's built once per call site rather than reconstructed for every element inside a filter.
+function daysAgoFrom(todayMs, dateStr){ return Math.round((todayMs - new Date(dateStr)) / 86400000); }
 function classifyDay(dayAgg){
   if (!dayAgg) return 'No entry';
   if (dayAgg.types.includes('Climbing')) return 'Climb';
@@ -440,8 +458,9 @@ function compareToWeeklyTemplate(entries){
 function computeWeeklyRadarData(entries){
   const isTaper = getCycleState(App.settings).phaseName === 'Taper';
   const targets = isTaper ? TAPER_WEEKLY_TARGETS : WEEKLY_TARGETS;
+  const todayMs = new Date(todayISO()).getTime();
   const days = dayList(entries).filter(d => {
-    const daysAgo = Math.round((new Date(todayISO()) - new Date(d.date)) / 86400000);
+    const daysAgo = daysAgoFrom(todayMs, d.date);
     return daysAgo >= 0 && daysAgo < 7;
   });
   const sums = { climb:0, fingers:0, strength:0, antag:0, core:0, flexibility:0, mobility:0, cardio:0 };
@@ -452,7 +471,8 @@ function computeWeeklyRadarData(entries){
 // Your own guidelines, checked against the trailing 7 days. Framed as a gentle check-in, not a
 // pass/fail — the point is noticing drift, not adding pressure on top of an already full plate.
 function computeWeeklyGuidelines(entries){
-  const days = dayList(entries).filter(d => { const ago = Math.round((new Date(todayISO())-new Date(d.date))/86400000); return ago>=0 && ago<7; });
+  const todayMs = new Date(todayISO()).getTime();
+  const days = dayList(entries).filter(d => { const ago = daysAgoFrom(todayMs, d.date); return ago>=0 && ago<7; });
   const coreDayCount = days.filter(d => d.timeCore > 0).length;
   const coreVariety = new Set();
   days.forEach(d => d.entries.forEach(e => {
@@ -507,8 +527,9 @@ function detectPatterns(entries){
   const flags = [];
   const days = dayList(entries); // already sorted, most recent first, one record per calendar day
   const last10Days = days.slice(0,10);
-  const last14Days = days.filter(d => { const ago = Math.round((new Date(todayISO())-new Date(d.date))/86400000); return ago>=0 && ago<14; });
-  const last7Days = days.filter(d => { const ago = Math.round((new Date(todayISO())-new Date(d.date))/86400000); return ago>=0 && ago<7; });
+  const todayMs = new Date(todayISO()).getTime();
+  const last14Days = days.filter(d => { const ago = daysAgoFrom(todayMs, d.date); return ago>=0 && ago<14; });
+  const last7Days = days.filter(d => { const ago = daysAgoFrom(todayMs, d.date); return ago>=0 && ago<7; });
   const climbDays = days.filter(d => classifyDay(d)==='Climb');
   const last4ClimbDays = climbDays.slice(0,4);
 
@@ -538,7 +559,7 @@ function detectPatterns(entries){
 
   const lastMobilityDay = days.find(d => d.timeMobility > 0);
   if (lastMobilityDay) {
-    const ago = Math.round((new Date(todayISO()) - new Date(lastMobilityDay.date)) / 86400000);
+    const ago = daysAgoFrom(todayMs, lastMobilityDay.date);
     if (ago >= 10) flags.push("It's been " + ago + " days since any mobility/stretch work showed up in the log.");
   } else if (days.length >= 6) {
     flags.push("No mobility/stretch work logged yet — worth adding on a non-climbing day.");
@@ -719,6 +740,7 @@ function savePlanAsImage(){
 function setPlanAdherence(v){ App.ui.planAdherencePick = v; App.render(); }
 function showLastPlan(){
   if (!App.lastPlan) return;
+  if (App.ui.planText !== App.lastPlan.text) App.ui.doneExercises = new Set(); // genuinely different plan - fresh start; same plan you're returning to - keep progress
   App.ui.planText = App.lastPlan.text;
   App.ui.planError = '';
   App.ui.planUnlocked = true;
@@ -871,7 +893,7 @@ async function askClaude(feedback){
     const weak = getWeakPointProfile();
     const d = App.ui.askDraft;
 
-    const recent = dayList(App.entries).slice(0,14).reverse().map(d => {
+    const recent = dayList(App.entries).slice(0,10).reverse().map(d => {
       const cls = classifyDay(d);
       const parts = [`${d.totalMinutes}min total`, cls];
       if (d.dayTypes.length) parts.push('day type: '+d.dayTypes.join('/'));
@@ -1044,34 +1066,91 @@ async function askClaude(feedback){
     App.ui.lastPlanContext = { sys, userMsg };
   }
 
+  currentStreamController = new AbortController();
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
       headers: { 'Content-Type':'application/json', 'x-api-key': key, 'anthropic-version':'2023-06-01',
                  'anthropic-dangerous-direct-browser-access':'true' },
-      body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1200, system: sys, messages }),
+      body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1200, system: sys, messages, stream:true }),
+      signal: currentStreamController.signal,
     });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error.message || 'API error');
-    const text = (data.content||[]).map(b=>b.text||'').join('\n').trim();
-    if (!text) {
+    if (!res.ok) {
+      let msg = 'HTTP ' + res.status;
+      try { const errBody = await res.json(); if (errBody.error) msg = errBody.error.message || msg; } catch(e){}
+      throw new Error(msg);
+    }
+    // Streaming: show the Plan tab right away and fill it in as text arrives, rather than sitting
+    // on a frozen "Thinking…" button for the whole generation. Total time is the same; the wait
+    // just stops being dead air.
+    App.ui.planText = '';
+    App.ui.planFeedback = '';
+    App.ui.planError = '';
+    App.ui.doneExercises = new Set();
+    App.ui.streaming = true;
+    App.ui.planUnlocked = true;
+    App.ui.planLoading = false;
+    App.setTab('plan');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '', text = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream:true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // keep the trailing partial line for the next chunk
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        let evt;
+        try { evt = JSON.parse(payload); } catch(e) { continue; }
+        if (evt.type === 'error') throw new Error((evt.error && evt.error.message) || 'stream error');
+        if (evt.type === 'content_block_delta' && evt.delta && evt.delta.text) {
+          text += evt.delta.text;
+          App.ui.planText = text;
+          updateStreamingView(text);
+        }
+      }
+    }
+
+    App.ui.streaming = false;
+    currentStreamController = null;
+    if (!text.trim()) {
       App.ui.planError = 'No response came back — try again.';
-      App.ui.planLoading = false;
       App.render();
       return;
     }
-    App.ui.planText = text;
-    App.ui.planFeedback = '';
-    App.ui.planError = '';
     App.saveLastPlan(text, App.ui.askDraft.sessionTypes);
-    App.ui.planUnlocked = true;
-    App.ui.planLoading = false; // clear before switching tabs, or the new tab renders stuck "loading"
-    App.setTab('plan');
+    App.render(); // final render swaps the plain streaming text for the full editable card view
   } catch(e) {
+    App.ui.streaming = false;
+    currentStreamController = null;
+    if (e.name === 'AbortError') {
+      // User-initiated cancel, not a failure — drop the partial plan and go back to Ask so they
+      // can actually change something, which is the whole reason to cancel mid-generation.
+      App.ui.planText = '';
+      App.ui.planUnlocked = false;
+      App.ui.planLoading = false;
+      App.setTab('ask');
+      return;
+    }
     App.ui.planError = 'Could not reach Claude: ' + e.message;
     App.ui.planLoading = false;
     App.render();
   }
+}
+let currentStreamController = null;
+function cancelGeneration(){
+  if (currentStreamController) currentStreamController.abort();
+}
+// Cheap per-chunk DOM write. Deliberately NOT a full App.render() — rebuilding the exercise cards,
+// hero counts and timer on every token would be janky and would fight the user for scroll position.
+function updateStreamingView(text){
+  const el = document.getElementById('streamingText');
+  if (el) el.textContent = text;
 }
 
 // ---- Rendering ----
@@ -1253,6 +1332,38 @@ function categorizeHeader(headerText){
   if (/mental/.test(t)) return 'mental';
   return 'default';
 }
+// Which named-exercise banks make sense to pull a replacement from for each category. Climbing and
+// mental cues deliberately have no pool — there's no library of bodyweight-style items that would
+// make sense to swap a climbing problem or a mental-game line for.
+const CATEGORY_EXERCISE_POOLS = {
+  warmup: ['Body Prep','Static Stretch','Functional Movement'],
+  core: ['Core Circuit','TRX — Core'],
+  strength: ['Upper Tabata','Full Efficient Workout','Leg Day','Fingers'],
+  mobility: ['Yoga Poses','Static Stretch','Foam Rolling','Lacrosse Ball Release','Functional Movement'],
+  default: ['General/Other'],
+};
+function pickSwapAlternative(category, currentName){
+  const styles = CATEGORY_EXERCISE_POOLS[category] || CATEGORY_EXERCISE_POOLS.default;
+  const pool = [...new Set(styles.flatMap(s => EXERCISE_LIBRARY[s] || []))].filter(x => x !== currentName);
+  if (!pool.length) return null;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+function swapPlanLine(index, category){
+  const lines = (App.ui.planText || '').split('\n');
+  const line = lines[index];
+  if (!line) return;
+  const bulletMatch = line.match(/^(\s*(?:[-*•]|\d+[.)])\s+)(.*)$/);
+  if (!bulletMatch) return;
+  const body = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
+  const sepMatch = body.match(/^(.*?)(:|—|–|,| - )([\s\S]*)$/);
+  const currentName = (sepMatch ? sepMatch[1] : body).trim();
+  const alt = pickSwapAlternative(category, currentName);
+  if (!alt) { App.toast('No alternatives available for this one'); return; }
+  const restPart = sepMatch ? sepMatch[2] + sepMatch[3] : '';
+  lines[index] = bulletMatch[1] + alt + restPart;
+  App.ui.planText = lines.join('\n');
+  App.render();
+}
 // Pulls a trailing time mention ("— 10 min") off a header into its own badge chip.
 function parseHeaderParts(clean){
   const m = clean.match(/^(.*?)[\s—–-]+(\d+\s*(?:min|minutes|sec|seconds))\s*$/i);
@@ -1284,19 +1395,32 @@ function renderPlanEditable(text){
     const namePart = (sepMatch ? sepMatch[1] : body).trim();
     const restPart = sepMatch ? sepMatch[2].replace(/^[:,]\s*|^ - /, '') + sepMatch[3] : '';
     const nameHtml = namePart ? escHtml(namePart) : escHtml(body);
-    return `<div class="exercise-card" style="border-left-color:var(--cat-${category})">
-      <div class="exercise-card-main">
-        <div class="exercise-card-name">${namePart ? `<span class="ex-link" onclick="searchExercise('${escAttr(namePart)}')">${nameHtml}</span>` : nameHtml}</div>
-        ${restPart.trim() ? `<div class="exercise-card-detail">${escHtml(restPart.trim())}</div>` : ''}
+    const doneKey = namePart || body;
+    const isDone = App.ui.doneExercises.has(doneKey);
+    return `<div class="exercise-card${isDone?' done':''}" style="border-left-color:var(--cat-${category})">
+      <div class="exercise-card-top">
+        <button type="button" class="exercise-check${isDone?' checked':''}" onclick="toggleExerciseDone('${escAttr(doneKey)}')" title="Mark done">${isDone?'&#10003;':''}</button>
+        <div class="exercise-card-main">
+          <div class="exercise-card-name">${namePart ? `<span class="ex-link" onclick="searchExercise('${escAttr(namePart)}')">${nameHtml}</span>` : nameHtml}</div>
+          ${restPart.trim() ? `<div class="exercise-card-detail">${escHtml(restPart.trim())}</div>` : ''}
+        </div>
       </div>
       <div class="plan-line-controls">
+        ${(category !== 'climb' && category !== 'mental') ? `<button type="button" onclick="swapPlanLine(${i},'${category}')" title="Swap for a different exercise">&#8635;</button>` : ''}
         <button type="button" onclick="movePlanLine(${i},-1)" title="Move up">&uarr;</button>
         <button type="button" onclick="movePlanLine(${i},1)" title="Move down">&darr;</button>
-        <button type="button" onclick="removePlanLine(${i})" title="Remove">&times;</button>
+        <button type="button" class="ex-remove" onclick="removePlanLine(${i})" title="Remove">&times;</button>
       </div>
     </div>`;
   }).join('');
 }
+function toggleExerciseDone(name){
+  if (App.ui.doneExercises.has(name)) App.ui.doneExercises.delete(name);
+  else App.ui.doneExercises.add(name);
+  App.render();
+}
+function toggleImportPanel(){ App.ui.importPanelOpen = !App.ui.importPanelOpen; App.render(); }
+function toggleLogMore(){ App.ui.logMoreOpen = !App.ui.logMoreOpen; App.render(); }
 
 App.render = function(){
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', !App.ui.qOpen && !App.ui.settingsOpen && b.dataset.tab === App.ui.tab));
@@ -1521,6 +1645,9 @@ function renderHome(){
 
   if (entries.length === 0) {
     return `
+    <div class="card" style="background:var(--surface2);">
+      <p class="small" style="margin:0;">You're set up for a <b>3-2-1 training cycle</b> (max strength &amp; power &rarr; power-endurance &rarr; taper), starting today. If that's not right — different framework, or you're mid-cycle already — adjust it any time in <a href="#" onclick="event.preventDefault(); openSettings();" style="color:var(--gold);">Settings</a>.</p>
+    </div>
     <div class="card">
       <div class="phase-banner">
         <div><div class="phase-name">${escHtml(cycle.phaseName)}</div>
@@ -1692,6 +1819,20 @@ function renderAsk(){
 }
 
 function renderPlan(){
+  // While streaming, show plain accumulating text — the editable card view (with reorder/remove
+  // controls, hero counts and section parsing) only makes sense once the full plan has landed.
+  if (App.ui.streaming) {
+    return `<div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="stream-dot"></span>
+          <span class="small muted">Writing your plan…</span>
+        </div>
+        <button class="btn btn-ghost" style="width:auto;padding:6px 14px;" onclick="cancelGeneration()">Stop &amp; adjust inputs</button>
+      </div>
+      <div class="plan-box" id="streamingText">${escHtml(App.ui.planText)}</div>
+    </div>`;
+  }
   if (!App.ui.planText) {
     return `<div class="card"><p class="small muted">No plan showing right now.</p>
       <button class="btn btn-primary" style="margin-top:10px;" onclick="App.setTab('ask')">Ask for today's plan</button></div>`;
@@ -1741,39 +1882,12 @@ function renderLog(){
   const isStrengthLike = d.type === 'Strength' || d.type === 'Antagonist / Stabilizer';
   const isCore = d.type === 'Core Workout';
   const editing = !!App.ui.editingId;
-  return `
-  ${!editing ? `<div class="card">
-    <h2>Import from a file${infoIcon("Upload a text file (notes from elsewhere, an export, whatever you've got) and Claude will read it and fill in the form below — you review and adjust before saving, nothing saves automatically.")}</h2>
-    <input type="file" id="importWorkoutFile" accept=".txt,.md,.csv,text/plain" onchange="importWorkoutFile(this.files[0])">
-    ${App.ui.importLoading ? `<p class="small muted" style="margin-top:8px;">Reading it…</p>` : ''}
-    ${App.ui.importError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.importError)}</p>` : ''}
-  </div>` : ''}
-  <div class="card">
-    ${editing ? `<div class="banner info">Editing an existing entry. <button class="btn btn-ghost" style="width:auto;padding:6px 12px;margin-left:8px;" onclick="cancelEdit()">Cancel edit</button></div>` : ''}
-    <h2>${editing ? 'Edit entry' : 'Log a session'}</h2>
-    <div class="row2">
-      <div class="field"><label>Date</label><input type="date" value="${d.date}" oninput="App.ui.logDraft.date=this.value"></div>
-      <div class="field"><label>Type</label>
-        <select onchange="setLogType(this.value)">
-          ${SESSION_TYPE_OPTIONS.concat(['Rest']).map(t=>`<option value="${t}" ${d.type===t?'selected':''}>${t}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-    <div class="field"><label>How'd it go (1 = flat, 5 = dialed)</label>${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setLogFeeling')}</div>
+  const moreOpen = editing || App.ui.logMoreOpen; // editing an entry always shows everything - nothing already filled in should look like it vanished
+
+  const moreDetailFields = `
     ${isClimbing ? `
     <div class="field"><label>Intensity</label>${pillsHTML(INTENSITY_OPTIONS, d.intensity, 'setLogIntensity', {sm:true})}</div>
     <div class="field"><label>Day type</label>${pillsHTML(DAY_TYPES, d.dayTypes, 'toggleLogDayType', {sm:true})}</div>
-    <div class="field"><label>Climbs done</label>
-      <div class="small muted" style="margin-bottom:6px;">Location for climbs you add below:</div>
-      ${pillsHTML(['Indoor','Outdoor'], App.ui.climbLocationDraft, 'setClimbLocation', {sm:true})}
-      <div class="row3" style="margin-top:8px;">
-        <input type="text" id="climbGrade" placeholder="grade e.g. 5.10c or V4">
-        <input type="number" id="climbCount" placeholder="count" min="1" value="1">
-        <button class="btn btn-ghost" style="padding:10px 14px;" onclick="addClimbRow()">+ add</button>
-      </div>
-      <div class="chip-list">${App.ui.climbsDraft.map((c,i)=>`<span class="pill sm active">${escHtml(c.grade)} &times;${escHtml(c.count)} <span class="small">(${c.location})</span>
-        <span onclick="removeClimbRow(${i})" style="cursor:pointer;margin-left:4px;">✕</span></span>`).join('')}</div>
-    </div>
     <div class="field"><label>Focus areas worked</label>${pillsHTML(FOCUS_AREAS, d.focus, 'toggleLogFocus', {sm:true})}</div>
     <div class="field"><label>Wall angle</label>${pillsHTML(WALL_ANGLES, d.wallAngle, 'toggleLogWall', {sm:true})}</div>
     <div class="field"><label>Hold types</label>${pillsHTML(HOLD_TYPES, d.holdTypes, 'toggleLogHold', {sm:true})}</div>
@@ -1792,6 +1906,44 @@ function renderLog(){
       ${d.workoutStyles.map(style => `<div class="small muted" style="margin:8px 0 4px;">${escHtml(style)}</div>${pillsHTML(EXERCISE_LIBRARY[style]||[], d.exercisesDone, 'toggleLogExercise', {sm:true})}`).join('')}
     </div>` : ''}
     `}
+    ${isClimbing ? `
+    <div class="field"><label>What broke down</label>
+      ${pillsHTML(FAILURE_POINT_OPTIONS, d.failurePoints, 'toggleLogFailurePoint', {sm:true})}
+      <textarea style="margin-top:8px;" placeholder="Any detail worth adding..." oninput="App.ui.logDraft.failurePointsOther=this.value">${escHtml(d.failurePointsOther)}</textarea>
+    </div>` : ''}`;
+
+  return `
+  ${!editing ? (App.ui.importPanelOpen ? `<div class="card">
+    <h2>Import from a file${infoIcon("Upload a text file (notes from elsewhere, an export, whatever you've got) and Claude will read it and fill in the form below — you review and adjust before saving, nothing saves automatically.")}</h2>
+    <input type="file" id="importWorkoutFile" accept=".txt,.md,.csv,text/plain" onchange="importWorkoutFile(this.files[0])">
+    ${App.ui.importLoading ? `<p class="small muted" style="margin-top:8px;">Reading it…</p>` : ''}
+    ${App.ui.importError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.importError)}</p>` : ''}
+    <button type="button" onclick="toggleImportPanel()" style="background:none;border:none;color:var(--muted);font-size:0.75rem;padding:6px 0 0;cursor:pointer;">Cancel</button>
+  </div>` : `<button type="button" onclick="toggleImportPanel()" style="background:none;border:none;color:var(--gold);font-size:0.8rem;padding:2px 0 12px;cursor:pointer;">Import from a file instead &rsaquo;</button>`) : ''}
+  <div class="card">
+    ${editing ? `<div class="banner info">Editing an existing entry. <button class="btn btn-ghost" style="width:auto;padding:6px 12px;margin-left:8px;" onclick="cancelEdit()">Cancel edit</button></div>` : ''}
+    <h2>${editing ? 'Edit entry' : 'Log a session'}</h2>
+    <div class="row2">
+      <div class="field"><label>Date</label><input type="date" value="${d.date}" oninput="App.ui.logDraft.date=this.value"></div>
+      <div class="field"><label>Type</label>
+        <select onchange="setLogType(this.value)">
+          ${SESSION_TYPE_OPTIONS.concat(['Rest']).map(t=>`<option value="${t}" ${d.type===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="field"><label>How'd it go (1 = flat, 5 = dialed)</label>${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setLogFeeling')}</div>
+    ${isClimbing ? `
+    <div class="field"><label>Climbs done</label>
+      <div class="small muted" style="margin-bottom:6px;">Location for climbs you add below:</div>
+      ${pillsHTML(['Indoor','Outdoor'], App.ui.climbLocationDraft, 'setClimbLocation', {sm:true})}
+      <div class="row3" style="margin-top:8px;">
+        <input type="text" id="climbGrade" placeholder="grade e.g. 5.10c or V4">
+        <input type="number" id="climbCount" placeholder="count" min="1" value="1">
+        <button class="btn btn-ghost" style="padding:10px 14px;" onclick="addClimbRow()">+ add</button>
+      </div>
+      <div class="chip-list">${App.ui.climbsDraft.map((c,i)=>`<span class="pill sm active">${escHtml(c.grade)} &times;${escHtml(c.count)} <span class="small">(${c.location})</span>
+        <span onclick="removeClimbRow(${i})" style="cursor:pointer;margin-left:4px;">✕</span></span>`).join('')}</div>
+    </div>` : ''}
     <h3>Time spent${infoIcon("Total time for the entry is just the sum of these — no separate total to keep in sync. Log stretching, mobility, or antagonist work as their own entry on the same date if you did them separately; the app combines same-day entries into one day, it won't count as extra days.")}</h3>
     ${isClimbing ? sliderRow('Climbing', 'timeClimb', d.timeClimb, 180) : ''}
     ${sliderRow('Finger strength', 'timeFingers', d.timeFingers)}
@@ -1801,13 +1953,14 @@ function renderLog(){
     ${sliderRow('Flexibility', 'timeFlexibility', d.timeFlexibility)}
     ${sliderRow('Mobility', 'timeMobility', d.timeMobility)}
     ${sliderRow('Cardio', 'timeCardio', d.timeCardio)}
-    ${isClimbing ? `
-    <div class="field"><label>What broke down</label>
-      ${pillsHTML(FAILURE_POINT_OPTIONS, d.failurePoints, 'toggleLogFailurePoint', {sm:true})}
-      <textarea style="margin-top:8px;" placeholder="Any detail worth adding..." oninput="App.ui.logDraft.failurePointsOther=this.value">${escHtml(d.failurePointsOther)}</textarea>
-    </div>` : ''}
     <div class="field"><label>Pain or discomfort</label>${pillsHTML(PAIN_OPTIONS, d.pain, 'setLogPain', {sm:true})}</div>
-    <div class="field"><label>Notes</label>
+    ${!isRest ? `
+    <button type="button" onclick="toggleLogMore()" style="background:none;border:none;color:var(--gold);font-size:0.8rem;padding:4px 0;cursor:pointer;margin-top:6px;">
+      ${moreOpen ? 'Hide extra detail &#9650;' : 'Add more detail — day type, focus areas, routine, etc. (optional) &#9660;'}
+    </button>
+    ${moreOpen ? moreDetailFields : ''}
+    ` : ''}
+    <div class="field" style="margin-top:14px;"><label>Notes</label>
       <textarea placeholder="Anything else worth remembering..." oninput="App.ui.logDraft.notes=this.value">${escHtml(d.notes)}</textarea>
     </div>
     <button class="btn btn-primary" onclick="submitLog()">${editing ? 'Save changes' : 'Save entry'}</button>
@@ -1815,8 +1968,13 @@ function renderLog(){
 }
 
 function renderEntriesAndCheckins(){
-  const entries = [...App.entries].sort((a,b)=> b.date.localeCompare(a.date));
-  const entryRows = entries.map(e => `
+  const allEntries = [...App.entries].sort((a,b)=> b.date.localeCompare(a.date));
+  // Only render a window of entries. Previously this rendered every entry ever logged, which meant
+  // expanding a single row rebuilt the entire history — measurably ~400ms at two years of data,
+  // and growing linearly forever.
+  const shown = allEntries.slice(0, App.ui.entriesShown);
+  const remaining = allEntries.length - shown.length;
+  const entryRows = shown.map(e => `
     <div class="entry">
       <button class="entry-head" onclick="toggleEntry('${e.id}')">
         <span><b>${e.date}</b> &nbsp;<span class="muted">${e.type}${e.type==='Climbing' ? ' · '+e.duration+'min · feeling '+e.feeling+'/5' : ' · '+e.duration+'min'}</span></span>
@@ -1871,7 +2029,11 @@ function renderEntriesAndCheckins(){
 
   return `
   <div class="card"><h2>Weak-point check-ins</h2>${assessRows}</div>
-  <div class="card"><h2>Entries</h2>${entryRows}</div>`;
+  <div class="card">
+    <h2>Entries${allEntries.length ? ` <span class="small muted" style="font-weight:400;">(${shown.length} of ${allEntries.length})</span>` : ''}</h2>
+    ${entryRows}
+    ${remaining > 0 ? `<button class="btn btn-ghost" style="margin-top:10px;" onclick="showMoreEntries()">Show ${Math.min(50, remaining)} more (${remaining} older)</button>` : ''}
+  </div>`;
 }
 
 function renderSettings(){
@@ -2120,10 +2282,12 @@ function submitLog(){
   App.ui.climbsDraft = [];
   App.ui.climbLocationDraft = 'Indoor';
   App.ui.editingId = null;
+  App.ui.logMoreOpen = false;
   App.setTab('home');
 }
 
 function toggleEntry(id){ App.ui.expandedEntry = App.ui.expandedEntry === id ? null : id; App.render(); }
+function showMoreEntries(){ App.ui.entriesShown += 50; App.render(); }
 function toggleAssessment(id){ App.ui.expandedAssessment = App.ui.expandedAssessment === id ? null : id; App.render(); }
 
 function setCycleType(t){ App.settings.cycleType = t; App.render(); }
@@ -2154,6 +2318,44 @@ document.getElementById('tabs').addEventListener('click', (e) => {
   if (btn) App.setTab(btn.dataset.tab);
 });
 
+// Swipe between tabs. Guards against: starting the touch on a slider/input (so dragging the
+// Minutes-available slider doesn't also change tabs), multi-touch, modal overlays being open, and
+// anything that's more vertical than horizontal (so normal scrolling never gets misread as a swipe).
+(function(){
+  let startX = null, startY = null, startTime = 0;
+  const panels = document.getElementById('panels');
+  panels.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { startX = null; return; }
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.closest('input,textarea,select')) { startX = null; return; }
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    startTime = Date.now();
+  }, {passive:true});
+  panels.addEventListener('touchend', (e) => {
+    if (startX === null) return;
+    if (App.ui.qOpen || App.ui.settingsOpen) return;
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - startX, dy = touch.clientY - startY;
+    const dt = Date.now() - startTime;
+    startX = null;
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5 || dt > 700) return;
+    const visibleTabs = ['home','ask'].concat(App.ui.planUnlocked ? ['plan'] : []).concat(['log']);
+    const curIdx = visibleTabs.indexOf(App.ui.tab);
+    if (curIdx === -1) return;
+    if (dx < 0 && curIdx < visibleTabs.length - 1) App.setTab(visibleTabs[curIdx+1]); // swipe left -> next tab
+    else if (dx > 0 && curIdx > 0) App.setTab(visibleTabs[curIdx-1]); // swipe right -> previous tab
+  }, {passive:true});
+})();
+
+// One-time hint that swiping works, shown once ever (not once per session) since the gesture itself
+// gives no visual clue that it exists. A short delay so it reads as a nudge, not something firing
+// before the person has even seen the screen.
+if (!localStorage.getItem('t4c_swipe_hint_shown')) {
+  setTimeout(() => { App.toast('Tip: swipe left/right to switch tabs'); }, 1200);
+  localStorage.setItem('t4c_swipe_hint_shown', '1');
+}
+
 App.load();
 App.render();
 
@@ -2164,7 +2366,11 @@ window.setTimerPreset = setTimerPreset; window.toggleTimer = toggleTimer; window
 window.toggleTimerPicker = toggleTimerPicker; window.TIMER_PRESETS = TIMER_PRESETS;
 window.toggleTimerExpanded = toggleTimerExpanded;
 window.toggleStopwatch = toggleStopwatch; window.resetStopwatch = resetStopwatch;
-window.removePlanLine = removePlanLine; window.movePlanLine = movePlanLine;
+window.removePlanLine = removePlanLine; window.movePlanLine = movePlanLine; window.swapPlanLine = swapPlanLine;
+window.toggleExerciseDone = toggleExerciseDone;
+window.toggleImportPanel = toggleImportPanel;
+window.toggleLogMore = toggleLogMore;
+window.cancelGeneration = cancelGeneration;
 window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
 window.EXERCISE_LIBRARY = EXERCISE_LIBRARY; window.WORKOUT_STYLES = WORKOUT_STYLES;
 window.FOCUS_AREAS = FOCUS_AREAS; window.ADHERENCE_OPTIONS = ADHERENCE_OPTIONS;
@@ -2175,7 +2381,7 @@ window.toggleLogFocus = toggleLogFocus; window.toggleLogWall = toggleLogWall; wi
 window.toggleLogDayType = toggleLogDayType; window.toggleLogFailurePoint = toggleLogFailurePoint;
 window.setClimbLocation = setClimbLocation;
 window.addClimbRow = addClimbRow; window.removeClimbRow = removeClimbRow; window.submitLog = submitLog;
-window.toggleEntry = toggleEntry; window.toggleAssessment = toggleAssessment; window.toggleLagging = toggleLagging; window.setCycleType = setCycleType; window.saveSettingsForm = saveSettingsForm;
+window.toggleEntry = toggleEntry; window.showMoreEntries = showMoreEntries; window.toggleAssessment = toggleAssessment; window.toggleLagging = toggleLagging; window.setCycleType = setCycleType; window.saveSettingsForm = saveSettingsForm;
 window.setFontSize = setFontSize;
 window.setTheme = setTheme;
 window.openSettings = openSettings; window.closeSettings = closeSettings;
