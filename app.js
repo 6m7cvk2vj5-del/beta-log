@@ -41,6 +41,13 @@ const RADAR_AXES = [
   {key:'antag', label:'Antagonist'}, {key:'core', label:'Core'}, {key:'flexibility', label:'Flexibility'},
   {key:'mobility', label:'Mobility'}, {key:'cardio', label:'Cardio'},
 ];
+// Radar axis labels are short display names; session types are the full picker values. Kept as an
+// explicit map rather than assuming a match, since three of them genuinely differ (Antagonist vs
+// Antagonist / Stabilizer, Flexibility vs Flexibility / Stretch, Core vs Core Workout).
+const RADAR_KEY_TO_SESSION_TYPE = {
+  climb:'Climbing', fingers:'Fingers', strength:'Strength', antag:'Antagonist / Stabilizer',
+  core:'Core Workout', flexibility:'Flexibility / Stretch', mobility:'Mobility', cardio:'Cardio',
+};
 
 // Your own workout structures and exercise pool — used for logging (what did I do) and the
 // weekly-guidelines check-in. These are guidelines to notice drift on, not requirements to hit.
@@ -191,11 +198,65 @@ const QUESTIONS = [
 const SCALE_LABELS = ['Almost always','Often','About half','Occasionally','Seldom','Never'];
 
 const PHASE_GUIDANCE = {
-  'Skill & Stamina': "High-volume, mostly submaximal climbing to build technique, movement skill, and aerobic capacity. Keep most climbing well below max difficulty — avoid grinding on near-limit problems this phase. Roughly: 10-20 min warmup+mobility, 60-120+ min of varied submaximal climbing (build toward high vertical footage, only light-moderate pump), light strength/core work, cooldown.",
-  'Max Strength & Power': "Lower-volume, high-intensity: near-limit bouldering and short, powerful efforts. Roughly: 15-25 min warmup+mobility, 30-60 min near-limit/hypergravity bouldering, 20-30 min finger-strength work (hangboard), 10-20 min pull-power work, 15-25 min core, 10-40 min antagonist/stabilizer + posterior chain (fine as a separate day), cooldown.",
-  'Power-Endurance': "Moderate-high intensity with short rest, building the ability to climb pumped without falling apart. Roughly: 20-30 min progressive warmup, 30-60 min interval-style climbing (e.g. 4x4s or a similar sustained/pumpy protocol), 15-20 min finger strength-endurance, 10-20 min pull-muscle endurance, 15-25 min core, 20-40 min antagonist/posterior chain (fine as a separate day), cooldown.",
-  'Taper': "Sharp drop in volume so the previous weeks' adaptations show up. Short sessions (20-40 min), one or two brief high-intensity touches early in the week, full rest days by the end. No new fatigue. Those brief touches should be climbing plus a small dose of finger maintenance — a couple of easy hangs, not a hangboard session — since contact strength is the most perishable quality on this short a timescale. Strength, antagonist, and core work should be treated as skippable this week, not just reduced; a week without them costs nothing and frees up recovery for what's actually being peaked.",
+  'Skill & Stamina': {
+    summary: "High-volume, mostly submaximal climbing to build technique, movement skill, and aerobic capacity. Keep most climbing well below max difficulty — avoid grinding on near-limit problems this phase.",
+    breakdown: [
+      {time:'10-20 min', label:'Warmup + mobility'},
+      {time:'60-120+ min', label:'Varied submaximal climbing — high vertical footage, only light-moderate pump'},
+      {time:'', label:'Light strength/core'},
+      {time:'', label:'Cooldown'},
+    ],
+  },
+  'Max Strength & Power': {
+    summary: "Lower-volume, high-intensity: near-limit bouldering and short, powerful efforts.",
+    breakdown: [
+      {time:'15-25 min', label:'Warmup + mobility'},
+      {time:'30-60 min', label:'Near-limit / hypergravity bouldering'},
+      {time:'20-30 min', label:'Finger-strength work (hangboard)'},
+      {time:'10-20 min', label:'Pull-power work'},
+      {time:'15-25 min', label:'Core'},
+      {time:'10-40 min', label:'Antagonist/stabilizer + posterior chain (fine as a separate day)'},
+      {time:'', label:'Cooldown'},
+    ],
+  },
+  'Power-Endurance': {
+    summary: "Moderate-high intensity with short rest, building the ability to climb pumped without falling apart.",
+    breakdown: [
+      {time:'20-30 min', label:'Progressive warmup'},
+      {time:'30-60 min', label:'Interval-style climbing (e.g. 4x4s or similar)'},
+      {time:'15-20 min', label:'Finger strength-endurance'},
+      {time:'10-20 min', label:'Pull-muscle endurance'},
+      {time:'15-25 min', label:'Core'},
+      {time:'20-40 min', label:'Antagonist/posterior chain (fine as a separate day)'},
+      {time:'', label:'Cooldown'},
+    ],
+  },
+  'Taper': {
+    summary: "Sharp drop in volume so the previous weeks' adaptations show up. Short sessions (20-40 min), one or two brief high-intensity touches early in the week, full rest days by the end. No new fatigue.",
+    breakdown: [
+      {time:'', label:'Climbing + a little finger maintenance (a couple easy hangs, not a hangboard session) — early in the week'},
+      {time:'', label:'Strength, antagonist, core — skippable this week, not just reduced'},
+    ],
+  },
 };
+// Reconstructs one plain-text description from summary + breakdown, for the AI prompt — kept as a
+// single source of truth rather than maintaining a separate hand-written paragraph that could drift.
+function phaseGuidanceText(phaseName){
+  const g = PHASE_GUIDANCE[phaseName];
+  if (!g) return '';
+  const parts = g.breakdown.map(b => (b.time ? b.time + ' ' : '') + b.label).join(', ');
+  return g.summary + (parts ? ' Roughly: ' + parts + '.' : '');
+}
+// Scannable version for Home — a short summary line plus a compact list, instead of one dense
+// paragraph with every duration and label run together.
+function renderPhaseGuidance(phaseName){
+  const g = PHASE_GUIDANCE[phaseName];
+  if (!g) return '';
+  return `<p class="small" style="margin-top:10px;">${escHtml(g.summary)}</p>
+    <div class="phase-breakdown">
+      ${g.breakdown.map(b => `<div class="phase-breakdown-row">${b.time ? `<span class="phase-breakdown-time">${escHtml(b.time)}</span>` : ''}<span>${escHtml(b.label)}</span></div>`).join('')}
+    </div>`;
+}
 
 const LS = {
   settings: 't4c_settings',
@@ -213,7 +274,7 @@ const App = {
   ui: { tab:'home', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
         qDraft: {}, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planText:'',
         editingId:null, planFeedback:'', lastPlanContext:null, showAdherence:false, planAdherencePick:'',
-        importLoading:false, importError:'', infoPopup:null, entriesShown:50, streaming:false, doneExercises: new Set(), importPanelOpen:false, logMoreOpen:false,
+        importLoading:false, importError:'', infoPopup:null, entriesShown:50, streaming:false, doneExercises: new Set(), logMoreOpen:false, logExtraFields:[], radarData:{}, radarSlide:0, radarSlideCount:1,
         timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false, expanded:false },
         stopwatch: { elapsedSeconds:0, running:false, intervalId:null } },
 
@@ -465,7 +526,16 @@ function computeWeeklyRadarData(entries){
   });
   const sums = { climb:0, fingers:0, strength:0, antag:0, core:0, flexibility:0, mobility:0, cardio:0 };
   days.forEach(d => { Object.keys(sums).forEach(k => { sums[k] += d['time'+k[0].toUpperCase()+k.slice(1)] || 0; }); });
-  return RADAR_AXES.map(a => ({ axis: a.label, pct: Math.min(150, Math.round((sums[a.key] / targets[a.key]) * 100)) }));
+  return RADAR_AXES.map(a => {
+    const value = sums[a.key], target = targets[a.key];
+    const pct = Math.min(150, Math.round((value / target) * 100));
+    return {
+      axis: a.label, pct, value, target,
+      detail: `${a.label}: ${value} of ${target} min this week (${pct}%).`,
+      actionLabel: `Ask for a ${a.label.toLowerCase()} session`,
+      actionFn: `jumpToAskWithType('${RADAR_KEY_TO_SESSION_TYPE[a.key]}')`,
+    };
+  });
 }
 
 // Your own guidelines, checked against the trailing 7 days. Framed as a gentle check-in, not a
@@ -493,7 +563,7 @@ function computeWeeklyGuidelines(entries){
   ];
 }
 
-function renderRadarSVG(data, size){
+function renderRadarSVG(data, size, chartId, compareData){
   size = size || 360; // internal coordinate space; actual rendered size is responsive via CSS below
   const cx = size/2, cy = size/2, r = size/2 - 75;
   const n = data.length;
@@ -509,18 +579,36 @@ function renderRadarSVG(data, size){
   // as someone who did exactly the target.
   const dataPts = data.map((d,i)=> pt(i, Math.min(1.3, d.pct/100)).join(',')).join(' ');
   const targetPts = data.map((d,i)=> pt(i,1).join(',')).join(' ');
+  const comparePts = compareData ? compareData.map((d,i)=> pt(i, Math.min(1.3, d.pct/100)).join(',')).join(' ') : null;
   const labels = data.map((d,i)=> {
     const [x,y] = pt(i, 1.4);
     const anchor = Math.abs(Math.cos(angle(i))) < 0.2 ? 'middle' : (Math.cos(angle(i)) > 0 ? 'start' : 'end');
-    return `<text x="${x}" y="${y}" fill="var(--muted)" font-size="9.5" text-anchor="${anchor}" dominant-baseline="middle">${escHtml(d.axis)}</text>`;
+    return `<text x="${x}" y="${y}" fill="var(--muted)" font-size="9.5" text-anchor="${anchor}" dominant-baseline="middle"${chartId ? ` onclick="tapRadarAxis('${chartId}',${i})" style="cursor:pointer;"` : ''}>${escHtml(d.axis)}</text>`;
   }).join('');
+  // Invisible, generously-sized tap targets at each data vertex — much easier to hit reliably than
+  // the small label text alone, especially for axes sitting near the center with little/no fill.
+  const tapTargets = chartId ? data.map((d,i) => {
+    const [x,y] = pt(i, Math.max(0.08, Math.min(1.3, d.pct/100)));
+    return `<circle cx="${x}" cy="${y}" r="16" fill="transparent" onclick="tapRadarAxis('${chartId}',${i})" style="cursor:pointer;"/>`;
+  }).join('') : '';
   return `<svg viewBox="0 0 ${size} ${size}" style="width:100%;max-width:320px;height:auto;display:block;overflow:visible;">
     ${rings}${spokes}
     <polygon points="${targetPts}" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3,3"/>
+    ${comparePts ? `<polygon points="${comparePts}" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.6"/>` : ''}
     <polygon points="${dataPts}" fill="rgba(${themeGoldRGB()},.35)" stroke="var(--gold)" stroke-width="2"/>
+    ${tapTargets}
     ${labels}
   </svg>`;
 }
+function tapRadarAxis(chartId, i){
+  const data = App.ui.radarData && App.ui.radarData[chartId];
+  if (!data || !data[i]) return;
+  const d = data[i];
+  App.ui.infoPopup = d.actionFn ? { text: d.detail, actionLabel: d.actionLabel, actionFn: d.actionFn } : d.detail;
+  App.render();
+}
+function jumpToAskWithType(type){ App.ui.askDraft.sessionTypes = [type]; App.setTab('ask'); }
+function jumpToAskWithFocus(area){ App.ui.askDraft.focusMode = 'pick'; App.ui.askDraft.focusPick = area; App.setTab('ask'); }
 
 // ---- Pattern detection (simple, transparent heuristics, day-based not entry-based) ----
 function detectPatterns(entries){
@@ -607,6 +695,29 @@ function getWeakPointProfile(){
   const leastWorked = Object.entries(counts).sort((a,b)=> a[1]-b[1]).slice(0,3).map(x=>x[0]);
   return { categoryRank, leastWorked };
 }
+// Mental/technique/physical self-assessment as a radar, comparing your two most recent check-ins
+// so it shows actual movement over time rather than repeating the same bar-list a single check-in
+// already gives you in Settings. Returns null when there's nothing to show yet.
+function computeWeakPointRadarData(){
+  if (App.assessments.length === 0) return null;
+  const catLabels = { mental:'Mental', technique:'Technique', physical:'Physical' };
+  const cats = ['mental','technique','physical'];
+  const latest = App.assessments[App.assessments.length - 1];
+  const previous = App.assessments.length >= 2 ? App.assessments[App.assessments.length - 2] : null;
+  const data = cats.map(c => {
+    const score = latest.scores[c];
+    const pct = Math.round(score/5*100);
+    let detail = `${catLabels[c]}: ${score.toFixed(1)} / 5 as of your ${latest.date} check-in.`;
+    if (previous) {
+      const delta = score - previous.scores[c];
+      const trend = delta > 0.05 ? `Up from ${previous.scores[c].toFixed(1)}` : delta < -0.05 ? `Down from ${previous.scores[c].toFixed(1)}` : `About the same as ${previous.scores[c].toFixed(1)}`;
+      detail += ` ${trend} on ${previous.date}.`;
+    }
+    return { axis: catLabels[c], pct, value: score, detail };
+  });
+  const compareData = previous ? cats.map(c => ({ pct: Math.round(previous.scores[c]/5*100) })) : null;
+  return { data, compareData, latestDate: latest.date, previousDate: previous ? previous.date : null };
+}
 
 // Where you stand on your own weekly guidelines — completed vs. not, nothing else. Pure
 // computation from data already tracked elsewhere, no API call needed.
@@ -614,23 +725,56 @@ function computeBriefing(entries){
   const guidelines = computeWeeklyGuidelines(entries);
   return { completed: guidelines.filter(g => g.ok), notCompleted: guidelines.filter(g => !g.ok) };
 }
-function renderBriefingCard(entries){
-  if (entries.length < 3) return ''; // not enough data yet to say anything meaningful
-  const isTaper = getCycleState(App.settings).phaseName === 'Taper';
-  if (isTaper) {
-    return `<div class="card">
-      <h2>Training briefing${infoIcon('Where you stand on your weekly guidelines — not a plan, just a status check.')}</h2>
-      <p class="small muted">You're in a taper week — reduced volume across the board is the goal, not a gap to fill. Weekly guideline tracking picks back up next phase.</p>
-    </div>`;
-  }
-  const b = computeBriefing(entries);
-  return `<div class="card">
-    <h2>Training briefing${infoIcon('Where you stand on your weekly guidelines — not a plan, just a status check.')}</h2>
-    ${b.completed.length ? `<p class="small" style="margin:6px 0;"><b style="color:var(--teal);">Completed this week:</b> ${escHtml(b.completed.map(g=>g.label).join(', '))}</p>` : ''}
-    ${b.notCompleted.length ? `<p class="small" style="margin:6px 0;"><b style="color:var(--gold);">Not yet this week:</b> ${escHtml(b.notCompleted.map(g=>g.label).join(', '))}</p>` : ''}
-  </div>`;
-}
+// Factual, restrained progress notes for Home — a coach mentioning something real and specific,
+// not a badge system. Deliberately limited to clean numeric comparisons (dates, durations) rather
+// than anything needing grade parsing or ordering, which would be unreliable given grades are free
+// text and inconsistently formatted. Caps at two notes so this never turns into a highlight reel.
+function computeProgressNotes(entries){
+  if (entries.length < 3) return [];
+  const days = dayList(entries); // sorted most-recent-first, one record per calendar day
+  const byDate = {}; days.forEach(d => { byDate[d.date] = d; });
+  const notes = [];
 
+  // Consecutive weeks (Mon-Sun) with at least one entry, counting back from the current week.
+  let weekStreak = 0;
+  let anchor = todayISO();
+  for (let i = 0; i < 52; i++) {
+    const weekDates = getWeekDates(anchor);
+    if (!weekDates.some(d => byDate[d])) break;
+    weekStreak++;
+    const monday = new Date(weekDates[0] + 'T00:00:00');
+    monday.setDate(monday.getDate() - 7);
+    anchor = toLocalISO(monday);
+  }
+  if (weekStreak >= 2) notes.push(`${weekStreak} weeks in a row with something logged.`);
+
+  // This week's numbers against the all-time record, checked independently so either (or both,
+  // capped at two total) can surface without one masking the other.
+  const thisWeekDates = new Set(getWeekDates(todayISO()));
+  const thisWeekDays = days.filter(d => thisWeekDates.has(d.date));
+
+  const maxSessionEver = Math.max(0, ...days.map(d => d.totalMinutes));
+  const maxSessionThisWeek = Math.max(0, ...thisWeekDays.map(d => d.totalMinutes));
+  if (maxSessionThisWeek > 0 && maxSessionThisWeek >= maxSessionEver) {
+    notes.push(`Longest single session yet: ${maxSessionThisWeek} min.`);
+  }
+
+  if (notes.length < 2) {
+    const weekTotals = {};
+    days.forEach(d => {
+      const wk = getWeekDates(d.date)[0]; // Monday of that day's week, used as the week's key
+      weekTotals[wk] = (weekTotals[wk] || 0) + d.totalMinutes;
+    });
+    const thisWeekKey = getWeekDates(todayISO())[0];
+    const thisWeekTotal = weekTotals[thisWeekKey] || 0;
+    const maxWeekEver = Math.max(0, ...Object.values(weekTotals));
+    if (thisWeekTotal > 0 && thisWeekTotal >= maxWeekEver) {
+      notes.push(`Most training minutes in a week yet: ${thisWeekTotal} min.`);
+    }
+  }
+
+  return notes.slice(0, 2);
+}
 function climbingSessionsSinceLastAssessment(){
   const last = App.assessments[App.assessments.length - 1];
   const cutoff = last ? last.date : '0000-00-00';
@@ -841,23 +985,6 @@ async function saveGeneratedPlanToLog(){
   }
 }
 
-async function importWorkoutFile(file){
-  if (!file) return;
-  App.ui.importLoading = true; App.ui.importError = ''; App.render();
-  try {
-    const text = await file.text();
-    const { fresh, climbsDraft } = await extractWorkoutData(text);
-    App.ui.logDraft = fresh;
-    App.ui.climbsDraft = climbsDraft;
-    App.ui.editingId = null;
-    App.toast('Extracted — review and save');
-  } catch(e) {
-    App.ui.importError = 'Could not read that file: ' + e.message;
-  } finally {
-    App.ui.importLoading = false; App.render();
-  }
-}
-
 // Gathers the named exercises actually relevant to what's being asked for, so the plan can be told
 // to draw from them — otherwise the model has no idea this bank exists and just invents its own,
 // which is why curated exercises were never actually getting suggested.
@@ -888,7 +1015,7 @@ async function askClaude(feedback){
     ];
   } else {
     const cycle = getCycleState(App.settings);
-    const guidance = PHASE_GUIDANCE[cycle.phaseName];
+    const guidance = phaseGuidanceText(cycle.phaseName);
     const flags = detectPatterns(App.entries);
     const weak = getWeakPointProfile();
     const d = App.ui.askDraft;
@@ -1146,11 +1273,26 @@ let currentStreamController = null;
 function cancelGeneration(){
   if (currentStreamController) currentStreamController.abort();
 }
+// Everything before the last header is treated as a finished section (a later header has already
+// started, so the model has moved on); everything from the last header onward is still being
+// written. With 0 or 1 headers so far there's nothing confirmed finished yet.
+function splitStreamingSections(text){
+  const lines = (text || '').split('\n');
+  const cls = classifyPlanLines(lines);
+  const headerIndices = [];
+  cls.forEach((c, i) => { if (c === 'header') headerIndices.push(i); });
+  if (headerIndices.length < 2) return { doneText: '', tailText: text || '' };
+  const splitAt = headerIndices[headerIndices.length - 1];
+  return { doneText: lines.slice(0, splitAt).join('\n'), tailText: lines.slice(splitAt).join('\n') };
+}
 // Cheap per-chunk DOM write. Deliberately NOT a full App.render() — rebuilding the exercise cards,
 // hero counts and timer on every token would be janky and would fight the user for scroll position.
 function updateStreamingView(text){
-  const el = document.getElementById('streamingText');
-  if (el) el.textContent = text;
+  const { doneText, tailText } = splitStreamingSections(text);
+  const cardsEl = document.getElementById('streamingCards');
+  const tailEl = document.getElementById('streamingText');
+  if (cardsEl) cardsEl.innerHTML = doneText ? renderPlanEditable(doneText, false) : '';
+  if (tailEl) tailEl.textContent = tailText;
 }
 
 // ---- Rendering ----
@@ -1369,7 +1511,8 @@ function parseHeaderParts(clean){
   const m = clean.match(/^(.*?)[\s—–-]+(\d+\s*(?:min|minutes|sec|seconds))\s*$/i);
   return m ? { title: m[1].trim(), badge: m[2].trim() } : { title: clean, badge: null };
 }
-function renderPlanEditable(text){
+function renderPlanEditable(text, interactive){
+  if (interactive === undefined) interactive = true;
   if (!text) return '';
   const lines = text.split('\n');
   const allCls = classifyPlanLines(lines);
@@ -1395,6 +1538,18 @@ function renderPlanEditable(text){
     const namePart = (sepMatch ? sepMatch[1] : body).trim();
     const restPart = sepMatch ? sepMatch[2].replace(/^[:,]\s*|^ - /, '') + sepMatch[3] : '';
     const nameHtml = namePart ? escHtml(namePart) : escHtml(body);
+    if (!interactive) {
+      // Read-only card for the streaming view: visual only, no checkbox or controls, since line
+      // indices here are relative to a partial slice of text that will shift once streaming finishes.
+      return `<div class="exercise-card" style="border-left-color:var(--cat-${category})">
+        <div class="exercise-card-top">
+          <div class="exercise-card-main">
+            <div class="exercise-card-name">${nameHtml}</div>
+            ${restPart.trim() ? `<div class="exercise-card-detail">${escHtml(restPart.trim())}</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }
     const doneKey = namePart || body;
     const isDone = App.ui.doneExercises.has(doneKey);
     return `<div class="exercise-card${isDone?' done':''}" style="border-left-color:var(--cat-${category})">
@@ -1419,7 +1574,6 @@ function toggleExerciseDone(name){
   else App.ui.doneExercises.add(name);
   App.render();
 }
-function toggleImportPanel(){ App.ui.importPanelOpen = !App.ui.importPanelOpen; App.render(); }
 function toggleLogMore(){ App.ui.logMoreOpen = !App.ui.logMoreOpen; App.render(); }
 
 App.render = function(){
@@ -1436,9 +1590,16 @@ App.render = function(){
   else if (App.ui.tab === 'plan') panel.innerHTML = renderPlan();
   else panel.innerHTML = renderLog();
   document.getElementById('infoOverlay').innerHTML = App.ui.infoPopup
-    ? `<div class="info-overlay" onclick="if(event.target===this) closeInfo()">
-        <div class="info-popup"><button class="close-x" onclick="closeInfo()">&times;</button><p>${escHtml(App.ui.infoPopup)}</p></div>
-      </div>`
+    ? (() => {
+        const popup = App.ui.infoPopup;
+        const rich = typeof popup === 'object' && popup !== null;
+        const text = rich ? popup.text : popup;
+        return `<div class="info-overlay" onclick="if(event.target===this) closeInfo()">
+          <div class="info-popup"><button class="close-x" onclick="closeInfo()">&times;</button><p>${escHtml(text)}</p>
+          ${rich && popup.actionLabel ? `<button class="btn btn-primary" style="margin-top:12px;" onclick="closeInfo(); ${popup.actionFn}">${escHtml(popup.actionLabel)}</button>` : ''}
+          </div>
+        </div>`;
+      })()
     : '';
 };
 function openSettings(){ App.ui.settingsOpen = true; App.render(); }
@@ -1613,6 +1774,48 @@ function tickStopwatch(){
   if (num) num.textContent = formatMMSS(sw.elapsedSeconds);
 }
 
+function renderWeakPointRadarCardStandalone(){
+  const wp = computeWeakPointRadarData();
+  if (!wp) return '';
+  App.ui.radarData.weakPoint = wp.data;
+  return `<div class="card">
+    <h2>Self-assessment${infoIcon(wp.previousDate ? `Comparing your ${wp.latestDate} check-in (solid, gold) against your ${wp.previousDate} check-in (dashed outline). Tap an axis for the numbers.` : 'From your most recent weak-point check-in. Take another to start seeing how this shifts over time. Tap an axis for the numbers.')}</h2>
+    <div style="display:flex;justify-content:center;">${renderRadarSVG(wp.data, undefined, 'weakPoint', wp.compareData)}</div>
+    ${wp.previousDate ? `<p class="small muted" style="text-align:center;margin-top:6px;">Gold: ${escHtml(wp.latestDate)} &middot; Dashed: ${escHtml(wp.previousDate)}</p>` : ''}
+  </div>`;
+}
+function renderRadarCarousel(radarData, focusRadarData){
+  const slides = [
+    { title: 'Weekly balance', tooltip: 'Trailing 7 days vs. rough weekly targets. Dashed ring = target; gold = you. Tap an axis for the numbers.', chartId: 'weeklyBalance', data: radarData },
+    { title: 'Focus area attention', tooltip: 'Last 10 days of logged sessions — the same window used when referencing your recent history for a plan request. Tap an axis for the numbers.', chartId: 'focusAttention', data: focusRadarData },
+  ];
+  const wp = computeWeakPointRadarData();
+  if (wp) {
+    slides.push({
+      title: 'Self-assessment',
+      tooltip: wp.previousDate
+        ? `Comparing your ${wp.latestDate} check-in (solid, gold) against your ${wp.previousDate} check-in (dashed outline). Tap an axis for the numbers.`
+        : 'From your most recent weak-point check-in. Take another to start seeing how this shifts over time. Tap an axis for the numbers.',
+      chartId: 'weakPoint', data: wp.data, compareData: wp.compareData,
+      caption: wp.previousDate ? `Gold: ${wp.latestDate} &middot; Dashed: ${wp.previousDate}` : null,
+    });
+    App.ui.radarData.weakPoint = wp.data;
+  }
+  App.ui.radarData.weeklyBalance = radarData;
+  App.ui.radarData.focusAttention = focusRadarData;
+  App.ui.radarSlideCount = slides.length;
+  const idx = Math.min(App.ui.radarSlide, slides.length - 1);
+  App.ui.radarSlide = idx; // clamp defensively if the slide count ever shrinks between renders
+  const slide = slides[idx];
+  const dots = slides.map((s,i) => `<button type="button" onclick="setRadarSlide(${i})" class="radar-dot${i===idx?' active':''}" aria-label="${escAttr(s.title)}"></button>`).join('');
+  return `<div class="card" id="radarCarousel">
+    <h2>${escHtml(slide.title)}${infoIcon(slide.tooltip)}</h2>
+    <div style="display:flex;justify-content:center;">${renderRadarSVG(slide.data, undefined, slide.chartId, slide.compareData)}</div>
+    ${slide.caption ? `<p class="small muted" style="text-align:center;margin-top:6px;">${slide.caption}</p>` : ''}
+    ${slides.length > 1 ? `<div class="radar-dots">${dots}</div>` : ''}
+  </div>`;
+}
+function setRadarSlide(i){ App.ui.radarSlide = i; App.render(); }
 function renderHome(){
   if (!App.settings.cycleStartDate) {
     return `<div class="card"><h2>Set up your cycle first</h2><p class="small muted">Open Settings to pick your cycle type and start date.</p>
@@ -1653,9 +1856,10 @@ function renderHome(){
         <div><div class="phase-name">${escHtml(cycle.phaseName)}</div>
           <div class="small muted">Week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks} &middot; ${App.settings.cycleType}</div></div>
       </div>
-      <p class="small" style="margin-top:10px;">${escHtml(PHASE_GUIDANCE[cycle.phaseName] || '')}</p>
+      ${renderPhaseGuidance(cycle.phaseName)}
     </div>
     ${banners}
+    ${renderWeakPointRadarCardStandalone()}
     ${ctas}
     <div class="card"><p class="muted small">No entries yet — log a session or ask for a plan to start seeing your training picture here.</p></div>`;
   }
@@ -1679,15 +1883,27 @@ function renderHome(){
     <div class="bar-val">${d.totalMinutes}</div></div>`;
   }).join('');
 
-  // focus area attention as a radar — relative to whichever area has gotten the most attention,
-  // over all logged time (not just the trailing week, unlike the weekly-balance radar above)
+  // focus area attention as a radar — trailing 10 days, matching the same window sent to Claude
+  // when referencing recent history for a plan request, rather than all-time (which barely moves
+  // week to week and stops reflecting what you've actually been doing lately)
+  const recentDays = days.slice(0, 10);
   const focusCounts = {}; FOCUS_AREAS.forEach(a=>focusCounts[a]=0);
-  days.forEach(d => d.focus.forEach(a=>{focusCounts[a]=(focusCounts[a]||0)+1;}));
+  recentDays.forEach(d => d.focus.forEach(a=>{focusCounts[a]=(focusCounts[a]||0)+1;}));
   const maxFocusCount = Math.max(1, ...Object.values(focusCounts));
-  const focusRadarData = FOCUS_AREAS.map(a => ({ axis: a, pct: Math.round(focusCounts[a]/maxFocusCount*100) }));
+  const focusRadarData = FOCUS_AREAS.map(a => {
+    const count = focusCounts[a];
+    return {
+      axis: a, pct: Math.round(count/maxFocusCount*100), value: count,
+      detail: `${a}: worked on ${count} time${count===1?'':'s'} in the last 10 days.`,
+      actionLabel: `Ask with ${a} as the focus`,
+      actionFn: `jumpToAskWithFocus('${a}')`,
+    };
+  });
 
   // weekly balance radar + template comparison
   const radarData = computeWeeklyRadarData(entries);
+  App.ui.radarData.weeklyBalance = radarData;
+  App.ui.radarData.focusAttention = focusRadarData;
   const tmpl = compareToWeeklyTemplate(entries);
   const tmplRow = tmpl.rows.map(r => {
     const mismatch = !r.isFuture && r.actual !== r.template && r.actual !== 'No entry';
@@ -1703,20 +1919,16 @@ function renderHome(){
       <div><div class="phase-name">${escHtml(cycle.phaseName)}</div>
         <div class="small muted">Week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks} &middot; ${App.settings.cycleType}</div></div>
     </div>
-    <p class="small" style="margin-top:10px;">${escHtml(PHASE_GUIDANCE[cycle.phaseName] || '')}</p>
+    ${renderPhaseGuidance(cycle.phaseName)}
     <div class="statgrid" style="margin-top:14px;">
       <div class="stat"><div class="num">${days.length}</div><div class="lbl">Days logged</div></div>
       <div class="stat"><div class="num">${climbDayCount}</div><div class="lbl">Climbing days</div></div>
       <div class="stat"><div class="num">${sinceAssessment}</div><div class="lbl">Since check-in</div></div>
     </div>
+    ${computeProgressNotes(entries).map(n => `<p class="small muted" style="margin:8px 0 0;">${escHtml(n)}</p>`).join('')}
   </div>
-  ${renderBriefingCard(App.entries)}
   ${banners}
-  ${ctas}
-  <div class="card">
-    <h2>Weekly balance${infoIcon('Trailing 7 days vs. rough weekly targets. Dashed ring = target; gold = you.')}</h2>
-    <div style="display:flex;justify-content:center;">${renderRadarSVG(radarData)}</div>
-  </div>
+  ${renderRadarCarousel(radarData, focusRadarData)}
   <div class="card">
     <h2>Minutes, last 14 days</h2>
     <div class="chart-legend" style="margin-top:8px;">${legend}</div>
@@ -1729,29 +1941,34 @@ function renderHome(){
     <div class="barlist">${tmplRow}</div>
     ${tmpl.notes.length ? `<p class="small" style="margin-top:10px;color:var(--red);">${tmpl.notes.join(' ')}</p>` : `<p class="small muted" style="margin-top:10px;">${tmpl.isTaper ? 'Tracking the taper shape so far this week.' : 'Tracking the usual rhythm so far this week.'}</p>`}
   </div>
-  <div class="card">
-    <h2>Focus area attention${infoIcon('Relative to whichever area has gotten the most attention across everything logged — not just the trailing week.')}</h2>
-    <div style="display:flex;justify-content:center;">${renderRadarSVG(focusRadarData)}</div>
-  </div>`;
+  ${ctas}`;
 }
 
-function renderLaggingCard(){
-  const flags = detectPatterns(App.entries);
+function renderBriefingCard(){
+  const entries = App.entries;
+  if (entries.length < 3) return ''; // not enough data yet to say anything meaningful
+  const isTaper = getCycleState(App.settings).phaseName === 'Taper';
+  const flags = detectPatterns(entries);
   const weak = getWeakPointProfile();
-  const missed = computeWeeklyGuidelines(App.entries).filter(g=>!g.ok).map(g=>g.label);
-  if (!flags.length && !weak.categoryRank && !missed.length && !weak.leastWorked.length) return '';
-  const open = App.ui.laggingOpen;
   const catLabels = {mental:'Mental', technique:'Technique', physical:'Physical'};
+  const open = App.ui.laggingOpen;
+
+  const guidelinesPart = isTaper
+    ? `<p class="small muted" style="margin:4px 0;">You're in a taper week — reduced volume across the board is the goal, not a gap to fill. Weekly guideline tracking picks back up next phase.</p>`
+    : (() => { const b = computeBriefing(entries); return `
+      ${b.completed.length ? `<p class="small" style="margin:4px 0;"><b style="color:var(--teal);">Completed this week:</b> ${escHtml(b.completed.map(g=>g.label).join(', '))}</p>` : ''}
+      ${b.notCompleted.length ? `<p class="small" style="margin:4px 0;"><b style="color:var(--gold);">Not yet this week:</b> ${escHtml(b.notCompleted.map(g=>g.label).join(', '))}</p>` : ''}`; })();
+
   return `<div class="card">
     <button type="button" onclick="toggleLagging()" style="background:none;border:none;padding:0;width:100%;display:flex;justify-content:space-between;align-items:center;cursor:pointer;color:var(--text);">
-      <h2 style="margin-bottom:0;">What's been lagging</h2>
+      <h2 style="margin-bottom:0;">Training briefing${infoIcon('Where you stand on your weekly guidelines, plus anything worth flagging before you ask for a plan.')}</h2>
       <span class="small muted">${open?'&#9650;':'&#9660;'}</span>
     </button>
     ${open ? `<div style="margin-top:10px;">
+      ${guidelinesPart}
       ${flags.map(f=>`<p class="small" style="margin:4px 0;">${escHtml(f)}</p>`).join('')}
       ${weak.categoryRank ? `<p class="small" style="margin:4px 0;">Weakest self-assessment category: <b>${escHtml(catLabels[weak.categoryRank[0][0]]||weak.categoryRank[0][0])}</b>.</p>` : ''}
       ${weak.leastWorked.length ? `<p class="small" style="margin:4px 0;">Least-practiced focus areas: <b>${escHtml(weak.leastWorked.join(', '))}</b>.</p>` : ''}
-      ${missed.length ? `<p class="small" style="margin:4px 0;">Not yet this week: <b>${escHtml(missed.join(', '))}</b>.</p>` : ''}
     </div>` : ''}
   </div>`;
 }
@@ -1765,18 +1982,10 @@ function renderAsk(){
   const weak = getWeakPointProfile();
   const weakOptionLabel = weak.categoryRank ? `Weakest area: ${weak.categoryRank[0][0]}` : null;
   return `
-  ${renderLaggingCard()}
+  ${renderBriefingCard()}
   <div class="card">
     <h2>Ask for today's plan</h2>
-    <div class="field" style="margin-top:14px;"><label>Minutes available: <b id="slider_askMinutes_val">${d.minutes}</b> min</label>
-      <input type="range" min="10" max="180" step="5" value="${d.minutes}"
-        oninput="App.ui.askDraft.minutes=Number(this.value); document.getElementById('slider_askMinutes_val').textContent=this.value;">
-    </div>
-    <div class="field"><label>How you're feeling</label>
-      ${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setAskFeeling')}
-      <div class="scale-caption" style="margin-top:2px;"><span>1 = flat</span><span>5 = dialed</span></div>
-    </div>
-    <div class="field"><label>Session type(s) wanted</label>
+    <div class="field" style="margin-top:14px;"><label>Session type(s) wanted</label>
       ${pillsHTML(SESSION_TYPE_OPTIONS, d.sessionTypes, 'toggleAskType')}
     </div>
     ${(d.sessionTypes.includes('Flexibility / Stretch') || d.sessionTypes.includes('Mobility')) ? `
@@ -1813,15 +2022,28 @@ function renderAsk(){
     <div class="field"><label>Secondary focus (optional)</label>
       ${pillsHTML(FOCUS_AREAS, d.focusSecondary, 'setFocusSecondary', {sm:true})}
     </div>
+    <div class="field"><label>Minutes available: <b id="slider_askMinutes_val">${d.minutes}</b> min</label>
+      <input type="range" min="10" max="180" step="5" value="${d.minutes}"
+        oninput="App.ui.askDraft.minutes=Number(this.value); document.getElementById('slider_askMinutes_val').textContent=this.value;">
+    </div>
+    <div class="field"><label>How you're feeling</label>
+      ${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setAskFeeling')}
+      <div class="scale-caption" style="margin-top:2px;"><span>1 = flat</span><span>5 = dialed</span></div>
+    </div>
     <button class="btn btn-primary" onclick="askClaude()" ${App.ui.planLoading?'disabled':''}>${App.ui.planLoading ? 'Thinking…' : "Get today's plan"}</button>
     ${App.ui.planError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.planError)}</p>` : ''}
   </div>`;
 }
 
 function renderPlan(){
-  // While streaming, show plain accumulating text — the editable card view (with reorder/remove
-  // controls, hero counts and section parsing) only makes sense once the full plan has landed.
+  // While streaming: sections that are clearly finished (a later header has already started)
+  // render as real cards, so the plan visibly assembles piece by piece. The section still actively
+  // being written renders as plain text until its own boundary appears — rendering interactive
+  // controls on an in-flux, possibly mid-word section doesn't make sense, and read-only cards for
+  // completed sections avoid the index-mismatch that interactive controls would have during this
+  // transient state anyway.
   if (App.ui.streaming) {
+    const { doneText, tailText } = splitStreamingSections(App.ui.planText);
     return `<div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
         <div style="display:flex;align-items:center;gap:8px;">
@@ -1830,7 +2052,8 @@ function renderPlan(){
         </div>
         <button class="btn btn-ghost" style="width:auto;padding:6px 14px;" onclick="cancelGeneration()">Stop &amp; adjust inputs</button>
       </div>
-      <div class="plan-box" id="streamingText">${escHtml(App.ui.planText)}</div>
+      <div id="streamingCards">${renderPlanEditable(doneText, false)}</div>
+      <div class="plan-box" id="streamingText" style="${doneText ? 'margin-top:8px;' : ''}">${escHtml(tailText)}</div>
     </div>`;
   }
   if (!App.ui.planText) {
@@ -1866,13 +2089,25 @@ function renderPlan(){
   <div class="timer-spacer"></div>`;
 }
 
-function sliderRow(label, field, value, max){
+function sliderRow(label, field, value, max, removable){
   max = max || 120;
   const id = 'slider_' + field;
-  return `<div class="field"><label>${label}: <b id="${id}_val">${value}</b> min</label>
+  return `<div class="field"><label>${label}: <b id="${id}_val">${value}</b> min${removable ? ` <button type="button" onclick="removeLogTimeField('${field}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.75rem;padding:0 0 0 6px;">&times; remove</button>` : ''}</label>
     <input type="range" min="0" max="${max}" step="5" value="${value}"
       oninput="App.ui.logDraft.${field}=Number(this.value); document.getElementById('${id}_val').textContent=this.value;">
   </div>`;
+}
+function primaryTimeFieldForType(type){
+  return type === 'Climbing' ? 'timeClimb' : (TYPE_TO_TIME_FIELD[type] || null);
+}
+function addLogTimeField(field){
+  if (!App.ui.logExtraFields.includes(field)) App.ui.logExtraFields.push(field);
+  App.render();
+}
+function removeLogTimeField(field){
+  App.ui.logDraft[field] = 0; // don't leave a hidden nonzero value behind
+  App.ui.logExtraFields = App.ui.logExtraFields.filter(f => f !== field);
+  App.render();
 }
 
 function renderLog(){
@@ -1912,14 +2147,11 @@ function renderLog(){
       <textarea style="margin-top:8px;" placeholder="Any detail worth adding..." oninput="App.ui.logDraft.failurePointsOther=this.value">${escHtml(d.failurePointsOther)}</textarea>
     </div>` : ''}`;
 
+  const primaryField = primaryTimeFieldForType(d.type);
+  const extraFields = App.ui.logExtraFields.filter(f => f !== primaryField);
+  const availableToAdd = TIME_FIELDS.filter(f => f !== primaryField && !extraFields.includes(f));
+
   return `
-  ${!editing ? (App.ui.importPanelOpen ? `<div class="card">
-    <h2>Import from a file${infoIcon("Upload a text file (notes from elsewhere, an export, whatever you've got) and Claude will read it and fill in the form below — you review and adjust before saving, nothing saves automatically.")}</h2>
-    <input type="file" id="importWorkoutFile" accept=".txt,.md,.csv,text/plain" onchange="importWorkoutFile(this.files[0])">
-    ${App.ui.importLoading ? `<p class="small muted" style="margin-top:8px;">Reading it…</p>` : ''}
-    ${App.ui.importError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.importError)}</p>` : ''}
-    <button type="button" onclick="toggleImportPanel()" style="background:none;border:none;color:var(--muted);font-size:0.75rem;padding:6px 0 0;cursor:pointer;">Cancel</button>
-  </div>` : `<button type="button" onclick="toggleImportPanel()" style="background:none;border:none;color:var(--gold);font-size:0.8rem;padding:2px 0 12px;cursor:pointer;">Import from a file instead &rsaquo;</button>`) : ''}
   <div class="card">
     ${editing ? `<div class="banner info">Editing an existing entry. <button class="btn btn-ghost" style="width:auto;padding:6px 12px;margin-left:8px;" onclick="cancelEdit()">Cancel edit</button></div>` : ''}
     <h2>${editing ? 'Edit entry' : 'Log a session'}</h2>
@@ -1944,15 +2176,17 @@ function renderLog(){
       <div class="chip-list">${App.ui.climbsDraft.map((c,i)=>`<span class="pill sm active">${escHtml(c.grade)} &times;${escHtml(c.count)} <span class="small">(${c.location})</span>
         <span onclick="removeClimbRow(${i})" style="cursor:pointer;margin-left:4px;">✕</span></span>`).join('')}</div>
     </div>` : ''}
-    <h3>Time spent${infoIcon("Total time for the entry is just the sum of these — no separate total to keep in sync. Log stretching, mobility, or antagonist work as their own entry on the same date if you did them separately; the app combines same-day entries into one day, it won't count as extra days.")}</h3>
-    ${isClimbing ? sliderRow('Climbing', 'timeClimb', d.timeClimb, 180) : ''}
-    ${sliderRow('Finger strength', 'timeFingers', d.timeFingers)}
-    ${sliderRow('Strength', 'timeStrength', d.timeStrength)}
-    ${sliderRow('Antagonist/stabilizer', 'timeAntag', d.timeAntag)}
-    ${sliderRow('Core', 'timeCore', d.timeCore)}
-    ${sliderRow('Flexibility', 'timeFlexibility', d.timeFlexibility)}
-    ${sliderRow('Mobility', 'timeMobility', d.timeMobility)}
-    ${sliderRow('Cardio', 'timeCardio', d.timeCardio)}
+    ${!isRest ? `
+    <h3>Time spent${infoIcon('Total time for the entry is just the sum of these — no separate total to keep in sync. If today was genuinely more than one thing (e.g. core plus antagonist work), use the option below to add another instead of logging a second entry.')}</h3>
+    ${primaryField ? sliderRow(TIME_BUCKET_LABELS[primaryField], primaryField, d[primaryField], primaryField==='timeClimb'?180:120) : ''}
+    ${extraFields.map(f => sliderRow(TIME_BUCKET_LABELS[f], f, d[f], 120, true)).join('')}
+    ${availableToAdd.length ? `<div class="field">
+      <label class="small muted" style="text-transform:none;">Also include...</label>
+      <div class="pillrow" style="margin-top:6px;">
+        ${availableToAdd.map(f => `<button type="button" class="pill sm" onclick="addLogTimeField('${f}')">+ ${TIME_BUCKET_LABELS[f]}</button>`).join('')}
+      </div>
+    </div>` : ''}
+    ` : ''}
     <div class="field"><label>Pain or discomfort</label>${pillsHTML(PAIN_OPTIONS, d.pain, 'setLogPain', {sm:true})}</div>
     ${!isRest ? `
     <button type="button" onclick="toggleLogMore()" style="background:none;border:none;color:var(--gold);font-size:0.8rem;padding:4px 0;cursor:pointer;margin-top:6px;">
@@ -2145,6 +2379,7 @@ function setLogType(t){
   App.ui.logDraft.exercisesDone = [];
   App.ui.logDraft.muscleGroup = []; App.ui.logDraft.powerLevel = '';
   App.ui.logDraft.coreRegion = []; App.ui.logDraft.coreMovementType = [];
+  App.ui.logExtraFields = [];
   App.render();
 }
 function toggleLogFocus(a){ toggleArr(App.ui.logDraft.focus, a); App.render(); }
@@ -2220,6 +2455,10 @@ function editEntry(id){
   ['dayTypes','focus','wallAngle','holdTypes','workoutStyles','exercisesDone','muscleGroup','coreRegion','coreMovementType','failurePoints']
     .forEach(f => { App.ui.logDraft[f] = arr(App.ui.logDraft[f]); });
   App.ui.climbsDraft = arr(e.climbs).slice();
+  // Surface any nonzero time field beyond the type's primary one, so an old multi-component entry
+  // (e.g. Core logged alongside Antagonist) doesn't have real data hidden behind the "also include" row.
+  const primary = primaryTimeFieldForType(App.ui.logDraft.type);
+  App.ui.logExtraFields = TIME_FIELDS.filter(f => f !== primary && Number(App.ui.logDraft[f]) > 0);
   App.ui.editingId = id;
   App.setTab('log');
 }
@@ -2283,6 +2522,7 @@ function submitLog(){
   App.ui.climbLocationDraft = 'Indoor';
   App.ui.editingId = null;
   App.ui.logMoreOpen = false;
+  App.ui.logExtraFields = [];
   App.setTab('home');
 }
 
@@ -2318,11 +2558,12 @@ document.getElementById('tabs').addEventListener('click', (e) => {
   if (btn) App.setTab(btn.dataset.tab);
 });
 
-// Swipe between tabs. Guards against: starting the touch on a slider/input (so dragging the
-// Minutes-available slider doesn't also change tabs), multi-touch, modal overlays being open, and
-// anything that's more vertical than horizontal (so normal scrolling never gets misread as a swipe).
+// Swipe between tabs, or between radar slides if the touch starts inside the carousel. Guards
+// against: starting the touch on a slider/input (so dragging the Minutes-available slider doesn't
+// also change tabs), multi-touch, modal overlays being open, and anything more vertical than
+// horizontal (so normal scrolling never gets misread as a swipe).
 (function(){
-  let startX = null, startY = null, startTime = 0;
+  let startX = null, startY = null, startTime = 0, startInCarousel = false;
   const panels = document.getElementById('panels');
   panels.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) { startX = null; return; }
@@ -2331,6 +2572,7 @@ document.getElementById('tabs').addEventListener('click', (e) => {
     startX = e.touches[0].clientX;
     startY = e.touches[0].clientY;
     startTime = Date.now();
+    startInCarousel = !!e.target.closest('#radarCarousel');
   }, {passive:true});
   panels.addEventListener('touchend', (e) => {
     if (startX === null) return;
@@ -2338,8 +2580,15 @@ document.getElementById('tabs').addEventListener('click', (e) => {
     const touch = e.changedTouches[0];
     const dx = touch.clientX - startX, dy = touch.clientY - startY;
     const dt = Date.now() - startTime;
+    const wasInCarousel = startInCarousel;
     startX = null;
     if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5 || dt > 700) return;
+    if (wasInCarousel) {
+      const n = App.ui.radarSlideCount || 1;
+      if (dx < 0 && App.ui.radarSlide < n - 1) { App.ui.radarSlide++; App.render(); }
+      else if (dx > 0 && App.ui.radarSlide > 0) { App.ui.radarSlide--; App.render(); }
+      return;
+    }
     const visibleTabs = ['home','ask'].concat(App.ui.planUnlocked ? ['plan'] : []).concat(['log']);
     const curIdx = visibleTabs.indexOf(App.ui.tab);
     if (curIdx === -1) return;
@@ -2368,7 +2617,6 @@ window.toggleTimerExpanded = toggleTimerExpanded;
 window.toggleStopwatch = toggleStopwatch; window.resetStopwatch = resetStopwatch;
 window.removePlanLine = removePlanLine; window.movePlanLine = movePlanLine; window.swapPlanLine = swapPlanLine;
 window.toggleExerciseDone = toggleExerciseDone;
-window.toggleImportPanel = toggleImportPanel;
 window.toggleLogMore = toggleLogMore;
 window.cancelGeneration = cancelGeneration;
 window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
@@ -2397,4 +2645,5 @@ window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCate
 window.toggleMentalFocus = toggleMentalFocus;
 window.sharePlan = sharePlan; window.toggleMobilityFocus = toggleMobilityFocus; window.toLocalISO = toLocalISO;
 window.setRoutineStyle = setRoutineStyle;
-window.importWorkoutFile = importWorkoutFile;
+window.tapRadarAxis = tapRadarAxis; window.jumpToAskWithType = jumpToAskWithType; window.jumpToAskWithFocus = jumpToAskWithFocus;
+window.setRadarSlide = setRadarSlide;

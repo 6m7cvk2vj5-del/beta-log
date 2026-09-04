@@ -69,6 +69,9 @@
   .banner.warn{background:rgba(var(--red-rgb),.16);border-color:var(--red);}
   .phase-banner{display:flex;justify-content:space-between;align-items:center;}
   .phase-name{font-family:'Big Shoulders Display',sans-serif;font-size:1.25rem;font-weight:800;}
+  .phase-breakdown{margin-top:10px;display:flex;flex-direction:column;gap:5px;}
+  .phase-breakdown-row{display:flex;gap:8px;align-items:baseline;font-size:0.8rem;}
+  .phase-breakdown-time{flex:none;min-width:64px;color:var(--gold);font-weight:600;font-size:0.72rem;}
   .plan-box{white-space:pre-wrap;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:0.85rem;line-height:1.6;margin-top:10px;}
   .plan-editable{margin-top:10px;}
   .plan-plain{color:var(--muted);line-height:1.6;white-space:pre-wrap;font-size:0.8rem;margin:4px 0;}
@@ -78,15 +81,22 @@
   .plan-section-title{font-family:'Big Shoulders Display',sans-serif;font-weight:700;font-size:0.95rem;letter-spacing:.2px;}
   .plan-badge{background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:2px 9px;
     font-size:0.7rem;color:var(--muted);}
-  .exercise-card{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);
-    border-left:3px solid var(--cat-default);border-radius:8px;padding:9px 10px;margin-bottom:6px;}
+  .exercise-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);
+    border-left:3px solid var(--cat-default);border-radius:8px;padding:10px;margin-bottom:8px;}
+  .exercise-card.done{opacity:.55;}
+  .exercise-card.done .exercise-card-name{text-decoration:line-through;}
+  .exercise-card-top{display:flex;align-items:flex-start;gap:10px;}
+  .exercise-check{width:34px;height:34px;flex:none;border-radius:8px;border:1.5px solid var(--border);background:var(--surface);
+    color:var(--teal);font-weight:700;font-size:1rem;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;}
+  .exercise-check.checked{background:var(--teal);color:#fff;border-color:var(--teal);}
   .exercise-card-main{flex:1;min-width:0;}
   .exercise-card-name{font-weight:600;font-size:0.85rem;}
   .exercise-card-detail{color:var(--muted);font-size:0.75rem;margin-top:2px;}
-  .plan-line-controls{display:flex;gap:2px;flex:none;}
-  .plan-line-controls button{background:none;border:1px solid var(--border);color:var(--muted);border-radius:5px;
-    width:22px;height:22px;font-size:0.75rem;cursor:pointer;padding:0;line-height:1;}
+  .plan-line-controls{display:flex;gap:10px;flex:none;justify-content:flex-end;margin-top:10px;}
+  .plan-line-controls button{background:none;border:1.5px solid var(--border);color:var(--muted);border-radius:9px;
+    width:46px;height:46px;font-size:1.15rem;cursor:pointer;padding:0;line-height:1;}
   .plan-line-controls button:active{background:var(--surface2);}
+  .plan-line-controls button.ex-remove{color:var(--red);border-color:var(--red);}
   .plan-hero{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-top:12px;}
   .plan-hero-type{font-family:'Big Shoulders Display',sans-serif;font-weight:800;font-size:1.15rem;color:var(--gold);}
   .plan-hero-stats{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:0.8rem;color:var(--muted);}
@@ -150,6 +160,9 @@
   .chart-legend{display:flex;flex-wrap:wrap;gap:8px 12px;margin-bottom:10px;}
   .chart-legend span{display:inline-flex;align-items:center;gap:5px;font-size:0.7rem;color:var(--muted);}
   .chart-legend i{width:9px;height:9px;border-radius:2px;display:inline-block;}
+  .radar-dots{display:flex;justify-content:center;gap:8px;margin-top:12px;}
+  .radar-dots button{width:8px;height:8px;border-radius:50%;border:none;padding:0;background:var(--border);cursor:pointer;}
+  .radar-dots button.active{background:var(--gold);width:20px;border-radius:4px;}
   .stream-dot{width:8px;height:8px;border-radius:50%;background:var(--gold);display:inline-block;flex:none;
     animation:streamPulse 1.2s ease-in-out infinite;}
   @keyframes streamPulse{0%,100%{opacity:.25;}50%{opacity:1;}}
