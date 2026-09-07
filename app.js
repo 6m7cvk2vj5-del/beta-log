@@ -274,7 +274,7 @@ const App = {
   ui: { tab:'home', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
         qDraft: {}, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planText:'',
         editingId:null, planFeedback:'', lastPlanContext:null, showAdherence:false, planAdherencePick:'',
-        importLoading:false, importError:'', infoPopup:null, entriesShown:50, streaming:false, doneExercises: new Set(), logMoreOpen:false, logExtraFields:[], radarData:{}, radarSlide:0, radarSlideCount:1,
+        importLoading:false, importError:'', infoPopup:null, entriesShown:50, streaming:false, doneExercises: new Set(), logMoreOpen:false, logExtraFields:[], radarData:{}, radarSlide:0, radarSlideCount:1, swapHistory:{},
         timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false, expanded:false },
         stopwatch: { elapsedSeconds:0, running:false, intervalId:null } },
 
@@ -884,7 +884,7 @@ function savePlanAsImage(){
 function setPlanAdherence(v){ App.ui.planAdherencePick = v; App.render(); }
 function showLastPlan(){
   if (!App.lastPlan) return;
-  if (App.ui.planText !== App.lastPlan.text) App.ui.doneExercises = new Set(); // genuinely different plan - fresh start; same plan you're returning to - keep progress
+  if (App.ui.planText !== App.lastPlan.text) { App.ui.doneExercises = new Set(); App.ui.swapHistory = {}; } // genuinely different plan - fresh start; same plan you're returning to - keep progress
   App.ui.planText = App.lastPlan.text;
   App.ui.planError = '';
   App.ui.planUnlocked = true;
@@ -963,13 +963,50 @@ async function extractWorkoutData(text){
   return { fresh, climbsDraft };
 }
 
+// Which exercise line indices are NOT ticked as done, using the same identity key the checkbox
+// itself uses (full name including any internal qualifier, so "Lacrosse ball — pecs" and
+// "— forearms" are never confused for each other).
+function untickedExerciseIndices(text){
+  const lines = (text || '').split('\n');
+  const cls = classifyPlanLines(lines);
+  const indices = [];
+  lines.forEach((line, i) => {
+    if (cls[i] !== 'exercise') return;
+    const bulletMatch = line.match(/^(\s*(?:[-*•]|\d+[.)])\s+)(.*)$/);
+    if (!bulletMatch) return;
+    const body = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
+    const sepMatch = splitExerciseNameDetail(body);
+    const namePart = (sepMatch ? sepMatch[1] : body).trim();
+    if (!App.ui.doneExercises.has(namePart || body)) indices.push(i);
+  });
+  return indices;
+}
 // "Add this to today's log" — runs the plan text through the same extraction as a file import,
-// then drops you on the Log tab to review and adjust before it actually saves.
-async function saveGeneratedPlanToLog(){
+// then drops you on the Log tab to review and adjust before it actually saves. If some exercises
+// are ticked and some aren't, confirms first that the unticked ones should be dropped before
+// logging — but only in that genuinely ambiguous case: nobody touching the checkboxes at all logs
+// the whole plan as always, and everything ticked has nothing to remove either way.
+function saveGeneratedPlanToLog(){
+  const unticked = untickedExerciseIndices(App.ui.planText);
+  if (App.ui.doneExercises.size > 0 && unticked.length > 0) {
+    App.ui.infoPopup = {
+      text: "I'll remove the unticked exercises before entering this — proceed?",
+      actionLabel: 'Proceed',
+      actionFn: 'confirmSaveGeneratedPlanToLog(true)',
+    };
+    App.render();
+    return;
+  }
+  confirmSaveGeneratedPlanToLog(false);
+}
+async function confirmSaveGeneratedPlanToLog(filterUnticked){
   App.ui.importLoading = true; App.ui.importError = ''; App.render();
   try {
-    const { fresh, climbsDraft } = await extractWorkoutData(App.ui.planText);
-    fresh.plan = App.ui.planText;
+    const textToUse = filterUnticked
+      ? removePlanLinesAt(App.ui.planText, new Set(untickedExerciseIndices(App.ui.planText)))
+      : App.ui.planText;
+    const { fresh, climbsDraft } = await extractWorkoutData(textToUse);
+    fresh.plan = textToUse;
     fresh.planAdherence = App.ui.planAdherencePick;
     App.ui.logDraft = fresh;
     App.ui.climbsDraft = climbsDraft;
@@ -1110,8 +1147,15 @@ async function askClaude(feedback){
       "the wall — general movement prep to get the body ready (joint circles, activation drills, light dynamic " +
       "stretching — not on-wall climbing), (2) light easy climbing as a second warmup phase, (3) the main climbing " +
       "volume, (4) some near-limit/limit climbing, (5) climbing-related strength or power exercise, " +
-      "(6) a light health circuit covering fingers, wrists, shoulders, forearms, and hips, (7) cooldown/stabilizer " +
+      "(6) a light health circuit, (7) cooldown/stabilizer " +
       "work. That numbered list describes the STRUCTURE conceptually — it is not a template for output bullets. " +
+      "The health circuit in (6) actually covers two anatomically unrelated concerns — keep them clearly apart " +
+      "rather than one undifferentiated list: (6a) finger/wrist/forearm/shoulder maintenance — the grip-and-pull " +
+      "overuse-prevention side (hangboard health protocols, wrist mobility, shoulder external rotation) — and " +
+      "(6b) hip mobility/stability work, a completely different anatomical region tied to footwork and movement " +
+      "efficiency, not grip. A finger, hand, or wrist exercise never belongs under a hip-labeled section, and a hip " +
+      "exercise never belongs under the finger/forearm one — if you give these two pieces their own headers, keep " +
+      "every exercise under each header anatomically consistent with what that header is actually about. " +
       "Each of these seven pieces gets its own section header in what you write (e.g. '### Volume — 30 min'), never " +
       "a single bullet point summarizing the whole piece ('- Volume: climb 8-10 problems...' is wrong — a bullet is " +
       "always one specific, tappable thing, never a paragraph-level description of an entire phase). If a piece is " +
@@ -1214,6 +1258,7 @@ async function askClaude(feedback){
     App.ui.planFeedback = '';
     App.ui.planError = '';
     App.ui.doneExercises = new Set();
+    App.ui.swapHistory = {};
     App.ui.streaming = true;
     App.ui.planUnlocked = true;
     App.ui.planLoading = false;
@@ -1285,6 +1330,26 @@ function splitStreamingSections(text){
   const splitAt = headerIndices[headerIndices.length - 1];
   return { doneText: lines.slice(0, splitAt).join('\n'), tailText: lines.slice(splitAt).join('\n') };
 }
+// Applies the same typographic hierarchy the final card view uses (bold larger headers, semi-bold
+// exercise names, muted plain text) to text that's still being streamed in, so the eventual switch
+// to full cards isn't a jarring size/weight jump. No card chrome (borders, checkbox, controls) —
+// a still-incomplete, possibly mid-word line shouldn't look like a finished, tappable tile yet.
+function renderStreamingTail(text){
+  if (!text) return '';
+  return text.split('\n').map(line => {
+    const cls = classifyPlanLineRaw(line);
+    if (cls === 'header') {
+      const clean = line.replace(/^\s*(?:#{1,6}|\d+[.)]|[-*•])\s+/, '').replace(/\*\*/g, '').trim();
+      return clean ? `<div class="plan-section-title" style="margin:10px 0 4px;">${escHtml(clean)}</div>` : '';
+    }
+    if (cls === 'exercise') {
+      const clean = line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').replace(/\*\*/g, '');
+      return `<div style="font-weight:600;font-size:0.85rem;margin:6px 0 0;">${escHtml(clean)}</div>`;
+    }
+    const clean = line.replace(/\*\*/g, '');
+    return clean.trim() ? `<div class="plan-plain">${escHtml(clean)}</div>` : '';
+  }).join('');
+}
 // Cheap per-chunk DOM write. Deliberately NOT a full App.render() — rebuilding the exercise cards,
 // hero counts and timer on every token would be janky and would fight the user for scroll position.
 function updateStreamingView(text){
@@ -1292,7 +1357,7 @@ function updateStreamingView(text){
   const cardsEl = document.getElementById('streamingCards');
   const tailEl = document.getElementById('streamingText');
   if (cardsEl) cardsEl.innerHTML = doneText ? renderPlanEditable(doneText, false) : '';
-  if (tailEl) tailEl.textContent = tailText;
+  if (tailEl) tailEl.innerHTML = renderStreamingTail(tailText);
 }
 
 // ---- Rendering ----
@@ -1326,6 +1391,16 @@ function arr(x){ return [].concat(x||[]); }
 // Shared parser: splits each bullet/numbered line of a generated plan into {prefix, name, rest} —
 // leading marker, the exercise-name portion (before the first : — – or comma), and everything
 // after (sets/reps/detail). Headers and plain prose lines come back with name:null, unchanged.
+// Splits an exercise line's body into name + detail. Comma/colon are tried first because several
+// library entries carry their own internal qualifier joined with an em-dash (Lacrosse ball — pecs,
+// Lacrosse ball — forearms, TRX — Core, etc) — splitting on the first dash unconditionally would
+// truncate those to the same ambiguous "Lacrosse ball" prefix, making two different exercises
+// collide under one identity (done-state, swap exclusion) even though they're not the same thing.
+function splitExerciseNameDetail(body){
+  let m = body.match(/^(.*?)(:|,)([\s\S]*)$/);
+  if (!m) m = body.match(/^(.*?)(—|–| - )([\s\S]*)$/);
+  return m;
+}
 function parsePlanLines(text){
   if (!text) return [];
   return text.split('\n').map(line => {
@@ -1333,7 +1408,7 @@ function parsePlanLines(text){
     if (!bulletMatch) return { prefix:'', name:null, rest: line };
     const prefix = bulletMatch[1];
     const body = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
-    const sepMatch = body.match(/^(.*?)(:|—|–|,| - )([\s\S]*)$/);
+    const sepMatch = splitExerciseNameDetail(body);
     const namePart = (sepMatch ? sepMatch[1] : body).trim();
     const restPart = sepMatch ? sepMatch[2] + sepMatch[3] : '';
     if (!namePart) return { prefix, name:null, rest: body };
@@ -1398,26 +1473,29 @@ function collapseBlankRuns(lines){
     if (cls[i] === 'blank' && cls[i-1] === 'blank') lines.splice(i, 1);
   }
 }
-function removePlanLine(index){
-  let lines = (App.ui.planText || '').split('\n');
-  // Classify BEFORE removing anything — deleting the target line can itself erase the context
-  // (e.g. a following dash-bulleted exercise) that identified a numbered line as a section header
-  // rather than an exercise, which would otherwise let an emptied header survive uncleaned.
+// Removes the given set of line indices from a plan, along with any section header left with no
+// exercises under it as a result, and collapses any resulting run of blank lines. Shared by
+// single-exercise removal and by filtering a plan down to only its ticked exercises.
+function removePlanLinesAt(text, indicesToRemove){
+  let lines = (text || '').split('\n');
   const clsBefore = classifyPlanLines(lines);
   const headersToAlsoRemove = new Set();
   clsBefore.forEach((c, i) => {
     if (c !== 'header') return;
     let hasExercise = false;
     for (let j = i+1; j < lines.length; j++) {
-      if (j === index) continue; // the line being removed doesn't count either way
+      if (indicesToRemove.has(j)) continue; // lines being removed don't count either way
       if (clsBefore[j] === 'header') break;
       if (clsBefore[j] === 'exercise') { hasExercise = true; break; }
     }
     if (!hasExercise) headersToAlsoRemove.add(i);
   });
-  lines = lines.filter((_, i) => i !== index && !headersToAlsoRemove.has(i));
+  lines = lines.filter((_, i) => !indicesToRemove.has(i) && !headersToAlsoRemove.has(i));
   collapseBlankRuns(lines);
-  App.ui.planText = lines.join('\n');
+  return lines.join('\n');
+}
+function removePlanLine(index){
+  App.ui.planText = removePlanLinesAt(App.ui.planText, new Set([index]));
   App.render();
 }
 function findSectionBounds(lines, cls, index){
@@ -1484,11 +1562,34 @@ const CATEGORY_EXERCISE_POOLS = {
   mobility: ['Yoga Poses','Static Stretch','Foam Rolling','Lacrosse Ball Release','Functional Movement'],
   default: ['General/Other'],
 };
-function pickSwapAlternative(category, currentName){
+// A locally-swapped exercise needs its own sensible default detail — reusing the exercise it's
+// replacing would leave a stale, potentially nonsensical prescription attached (e.g. a rep-based
+// movement keeping a hold-style "30 sec/side" left over from whatever it replaced). The swap pool
+// is just names with no built-in prescription, so this fills in something reasonable by category.
+function defaultDetailFor(name){
+  const n = name.toLowerCase();
+  if (/hold|plank|wall sit|bridge/.test(n)) return '30 sec';
+  if (/stretch|pigeon|pose|couch stretch/.test(n)) return '30 sec/side';
+  if (/lacrosse ball|foam roll/.test(n)) return '60 sec/area';
+  if (/finger|edge/.test(n) && /hang/.test(n)) return '10 sec x 5';
+  if (/hang/.test(n)) return '20-30 sec';
+  if (/circle|swing|windmill/.test(n)) return '10 each direction';
+  if (/get-up|carry|crawl/.test(n)) return '5 each side';
+  if (/curl|press|row|raise|squat|lift|push|pull|extension|fly/.test(n)) return '3 x 10-12';
+  return '2-3 sets';
+}
+// Cycles through the pool per line rather than picking purely at random each tap, so repeated taps
+// work through genuinely different options instead of occasionally repeating one you just saw.
+function pickSwapAlternative(category, currentName, index){
   const styles = CATEGORY_EXERCISE_POOLS[category] || CATEGORY_EXERCISE_POOLS.default;
-  const pool = [...new Set(styles.flatMap(s => EXERCISE_LIBRARY[s] || []))].filter(x => x !== currentName);
+  const fullPool = [...new Set(styles.flatMap(s => EXERCISE_LIBRARY[s] || []))];
+  const history = App.ui.swapHistory[index] || [];
+  let pool = fullPool.filter(x => x !== currentName && !history.includes(x));
+  if (!pool.length) { App.ui.swapHistory[index] = []; pool = fullPool.filter(x => x !== currentName); }
   if (!pool.length) return null;
-  return pool[Math.floor(Math.random() * pool.length)];
+  const choice = pool[Math.floor(Math.random() * pool.length)];
+  App.ui.swapHistory[index] = (App.ui.swapHistory[index] || []).concat([choice]);
+  return choice;
 }
 function swapPlanLine(index, category){
   const lines = (App.ui.planText || '').split('\n');
@@ -1497,12 +1598,11 @@ function swapPlanLine(index, category){
   const bulletMatch = line.match(/^(\s*(?:[-*•]|\d+[.)])\s+)(.*)$/);
   if (!bulletMatch) return;
   const body = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
-  const sepMatch = body.match(/^(.*?)(:|—|–|,| - )([\s\S]*)$/);
+  const sepMatch = splitExerciseNameDetail(body);
   const currentName = (sepMatch ? sepMatch[1] : body).trim();
-  const alt = pickSwapAlternative(category, currentName);
+  const alt = pickSwapAlternative(category, currentName, index);
   if (!alt) { App.toast('No alternatives available for this one'); return; }
-  const restPart = sepMatch ? sepMatch[2] + sepMatch[3] : '';
-  lines[index] = bulletMatch[1] + alt + restPart;
+  lines[index] = bulletMatch[1] + alt + ', ' + defaultDetailFor(alt);
   App.ui.planText = lines.join('\n');
   App.render();
 }
@@ -1534,7 +1634,7 @@ function renderPlanEditable(text, interactive){
     }
     const bulletMatch = line.match(/^(\s*(?:[-*•]|\d+[.)])\s+)(.*)$/);
     const body = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
-    const sepMatch = body.match(/^(.*?)(:|—|–|,| - )([\s\S]*)$/);
+    const sepMatch = splitExerciseNameDetail(body);
     const namePart = (sepMatch ? sepMatch[1] : body).trim();
     const restPart = sepMatch ? sepMatch[2].replace(/^[:,]\s*|^ - /, '') + sepMatch[3] : '';
     const nameHtml = namePart ? escHtml(namePart) : escHtml(body);
@@ -1638,7 +1738,7 @@ function renderTimerWidget(){
       </button>
       <button class="btn btn-primary" style="width:auto;padding:9px 16px;flex:none;" id="timerToggleBtn" onclick="toggleTimer()">${t.running ? 'Pause' : (t.remainingSeconds < t.totalSeconds && t.remainingSeconds > 0 ? 'Resume' : 'Start')}</button>
       <button class="btn btn-ghost" style="width:auto;padding:9px 12px;flex:none;" onclick="resetTimer()">Reset</button>
-      <button class="btn btn-ghost" style="width:auto;padding:9px 10px;flex:none;" onclick="toggleTimerExpanded()" title="Make bigger">&#x26F6;</button>
+      <button class="btn btn-ghost" style="width:auto;padding:9px 10px;flex:none;margin-left:auto;" onclick="toggleTimerExpanded()" title="Make bigger">&#x26F6;</button>
     </div>
     ${t.pickerOpen ? `<div class="timer-presets">
       ${TIMER_PRESETS.map(s=>`<button class="pill sm${t.totalSeconds===s?' active':''}" onclick="setTimerPreset(${s})">${formatPresetLabel(s)}</button>`).join('')}
@@ -1698,10 +1798,24 @@ function setTimerPreset(seconds){
 function pauseTimerInterval(){
   if (App.ui.timer.intervalId) { clearInterval(App.ui.timer.intervalId); App.ui.timer.intervalId = null; }
 }
+let sharedAudioCtx = null;
+function unlockAudio(){
+  try {
+    if (!sharedAudioCtx) sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (sharedAudioCtx.state === 'suspended') sharedAudioCtx.resume().catch(()=>{});
+  } catch(e) { /* audio not available on this device/browser */ }
+}
 function toggleTimer(){
   const t = App.ui.timer;
   if (t.running) { pauseTimerInterval(); t.running = false; App.render(); return; }
+  unlockAudio(); // must happen synchronously inside this direct tap, or the completion beep later won't be allowed to play
   if (t.remainingSeconds <= 0) { t.remainingSeconds = t.totalSeconds; }
+  // Absolute end-timestamp rather than a pure countdown — mobile browsers throttle or fully
+  // suspend setInterval in a backgrounded tab, so a naive "subtract 1 every tick" counter falls
+  // behind (or stops) while you're in another app. Recomputing from a fixed clock time on every
+  // tick, and again the moment the page becomes visible, keeps this correct regardless of how long
+  // the interval was actually able to run in between.
+  t.endTime = Date.now() + t.remainingSeconds * 1000;
   t.running = true;
   t.intervalId = setInterval(tickTimer, 1000);
   App.render();
@@ -1712,9 +1826,20 @@ function resetTimer(){
   App.ui.timer.running = false;
   App.render();
 }
+// Gradual, ease-in-out opacity pulse — deliberately not an abrupt flash. Works identically on
+// every platform since it's pure CSS/DOM, unlike audio (interrupts other apps' sound on iOS) or
+// vibration (Safari doesn't implement the API at all), so this is the one signal guaranteed to work.
+function pulseScreen(){
+  const el = document.getElementById('timerPulseOverlay');
+  if (!el) return;
+  el.classList.remove('pulse-active');
+  void el.offsetWidth; // force a reflow so the animation restarts even if a prior pulse is still running
+  el.classList.add('pulse-active');
+}
 function tickTimer(){
   const t = App.ui.timer;
-  t.remainingSeconds = Math.max(0, t.remainingSeconds - 1);
+  if (!t.running) return;
+  t.remainingSeconds = Math.max(0, Math.round((t.endTime - Date.now()) / 1000));
   // Direct DOM update, not a full App.render() — avoids interrupting typing or an open popup
   // elsewhere, and the widget only exists in the DOM at all when a plan is showing.
   const ring = document.getElementById('timerRing');
@@ -1730,6 +1855,7 @@ function tickTimer(){
   if (t.remainingSeconds === 0) {
     pauseTimerInterval();
     t.running = false;
+    pulseScreen();
     playTimerBeep();
     if (navigator.vibrate) navigator.vibrate([300,100,300,100,300]);
     const btn = document.getElementById('timerToggleBtn');
@@ -1737,8 +1863,9 @@ function tickTimer(){
   }
 }
 function playTimerBeep(){
+  const ctx = sharedAudioCtx;
+  if (!ctx) return; // never got unlocked by a Start tap - shouldn't happen, but nothing to play from
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
     [0, 0.3, 0.6, 0.9, 1.2].forEach(delay => {
       const osc = ctx.createOscillator(), gain = ctx.createGain();
       osc.connect(gain); gain.connect(ctx.destination);
@@ -2038,10 +2165,11 @@ function renderAsk(){
 function renderPlan(){
   // While streaming: sections that are clearly finished (a later header has already started)
   // render as real cards, so the plan visibly assembles piece by piece. The section still actively
-  // being written renders as plain text until its own boundary appears — rendering interactive
-  // controls on an in-flux, possibly mid-word section doesn't make sense, and read-only cards for
-  // completed sections avoid the index-mismatch that interactive controls would have during this
-  // transient state anyway.
+  // being written renders with matching typography (not the plain, uniform text block it used to
+  // be) so the eventual snap into full cards isn't a jarring size/weight change — but without the
+  // full card chrome (borders, controls), since rendering interactive controls or box styling on an
+  // in-flux, possibly mid-word line doesn't make sense, and it also avoids the index-mismatch that
+  // real controls would have during this transient state anyway.
   if (App.ui.streaming) {
     const { doneText, tailText } = splitStreamingSections(App.ui.planText);
     return `<div class="card">
@@ -2052,8 +2180,9 @@ function renderPlan(){
         </div>
         <button class="btn btn-ghost" style="width:auto;padding:6px 14px;" onclick="cancelGeneration()">Stop &amp; adjust inputs</button>
       </div>
+      ${renderTimerWidget()}
       <div id="streamingCards">${renderPlanEditable(doneText, false)}</div>
-      <div class="plan-box" id="streamingText" style="${doneText ? 'margin-top:8px;' : ''}">${escHtml(tailText)}</div>
+      <div id="streamingText">${renderStreamingTail(tailText)}</div>
     </div>`;
   }
   if (!App.ui.planText) {
@@ -2558,6 +2687,12 @@ document.getElementById('tabs').addEventListener('click', (e) => {
   if (btn) App.setTab(btn.dataset.tab);
 });
 
+// A backgrounded tab can throttle or fully suspend setInterval — coming back to a correct display
+// shouldn't have to wait for the next tick to happen to fire on its own.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && App.ui.timer.running) tickTimer();
+});
+
 // Swipe between tabs, or between radar slides if the touch starts inside the carousel. Guards
 // against: starting the touch on a slider/input (so dragging the Minutes-available slider doesn't
 // also change tabs), multi-touch, modal overlays being open, and anything more vertical than
@@ -2639,7 +2774,7 @@ window.applyPhaseOverride = applyPhaseOverride; window.exportData = exportData; 
 window.clearPainFlag = clearPainFlag; window.editEntry = editEntry; window.cancelEdit = cancelEdit;
 window.toggleLogWorkoutStyle = toggleLogWorkoutStyle; window.toggleLogExercise = toggleLogExercise;
 window.deleteEntry = deleteEntry; window.openPlanAsPage = openPlanAsPage; window.savePlanAsImage = savePlanAsImage;
-window.saveGeneratedPlanToLog = saveGeneratedPlanToLog; window.searchExercise = searchExercise; window.setPlanAdherence = setPlanAdherence;
+window.saveGeneratedPlanToLog = saveGeneratedPlanToLog; window.confirmSaveGeneratedPlanToLog = confirmSaveGeneratedPlanToLog; window.searchExercise = searchExercise; window.setPlanAdherence = setPlanAdherence;
 window.showLastPlan = showLastPlan;
 window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
 window.toggleMentalFocus = toggleMentalFocus;
