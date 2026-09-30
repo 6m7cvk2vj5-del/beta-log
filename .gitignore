@@ -1,0 +1,6 @@
+node_modules
+node_modules.nosync
+test-results/
+playwright-report/
+screenshots/
+.DS_Store

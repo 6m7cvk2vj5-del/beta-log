@@ -1,0 +1,13 @@
+{
+  "name": "beta-log",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Beta Log — climbing training log and workout generator (static PWA)",
+  "scripts": {
+    "serve": "python3 -m http.server 8080"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.1",
+    "playwright": "^1.63.0"
+  }
+}
