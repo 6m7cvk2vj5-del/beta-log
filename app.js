@@ -1760,11 +1760,11 @@ function renderTimerExpanded(){
     <div class="timer-expanded-box">
       <button class="close-x" style="position:absolute;top:14px;right:14px;" onclick="toggleTimerExpanded()" title="Shrink">&times;</button>
       <button type="button" class="timer-dial-btn" onclick="toggleTimerPicker()" title="Choose time">
-        <svg width="230" height="230" viewBox="0 0 230 230">
+        <svg class="timer-expanded-dial" width="230" height="230" viewBox="0 0 230 230">
           <circle cx="115" cy="115" r="${r}" fill="none" stroke="var(--border)" stroke-width="10"/>
           <circle id="timerRing" cx="115" cy="115" r="${r}" fill="none" stroke="${t.remainingSeconds===0?'var(--red)':'var(--gold)'}" stroke-width="10"
             stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" stroke-linecap="round" transform="rotate(-90 115 115)" style="transition:stroke-dashoffset 1s linear;"/>
-          <text id="timerNum" x="115" y="130" text-anchor="middle" font-size="46" fill="var(--text)" font-family="'Big Shoulders Display',sans-serif" font-weight="700">${formatMMSS(t.remainingSeconds)}</text>
+          <text id="timerNum" x="115" y="143" text-anchor="middle" font-size="80" fill="var(--text)" font-family="'Big Shoulders Display',sans-serif" font-weight="700">${formatMMSS(t.remainingSeconds)}</text>
         </svg>
       </button>
       ${t.pickerOpen ? `<div class="timer-presets" style="justify-content:center;">
