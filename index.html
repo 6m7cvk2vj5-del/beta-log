@@ -149,17 +149,18 @@
   .stopwatch-row{display:flex;align-items:center;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
   .stopwatch-label{font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;flex:none;}
   .stopwatch-num{font-family:'Big Shoulders Display',sans-serif;font-weight:700;font-size:1.15rem;flex:1;}
-  .timer-expanded-overlay{position:fixed;inset:0;background:var(--surface);display:flex;align-items:center;
-    justify-content:center;z-index:70;box-sizing:border-box;}
-  .timer-expanded-box{background:var(--surface);padding:48px 24px calc(28px + env(safe-area-inset-bottom));width:100%;height:100%;
+  /* the gold frame is the overlay itself; tapping it (not the card inside) minimises the timer */
+  .timer-expanded-overlay{position:fixed;inset:0;background:var(--gold);display:flex;align-items:center;
+    justify-content:center;z-index:70;padding:16px;box-sizing:border-box;}
+  .timer-expanded-box{--dial:min(calc(100vw - 80px),50vh,560px);background:var(--surface);border-radius:14px;padding:48px 24px calc(28px + env(safe-area-inset-bottom));width:100%;height:100%;
     overflow-y:auto;display:flex;flex-direction:column;align-items:center;position:relative;
     box-sizing:border-box;}
   /* spacers centre the content when it fits, and collapse to nothing when it overflows so the top stays reachable */
   .timer-expanded-box::before,.timer-expanded-box::after{content:'';flex:1 0 0;}
-  .timer-expanded-dial{width:min(92vw,52vh);height:auto;max-width:560px;}
+  .timer-expanded-dial{width:var(--dial);height:auto;}
   .timer-expanded-controls{display:flex;justify-content:center;gap:14px;margin-top:24px;}
   .timer-expanded-stopwatch{margin-top:34px;padding-top:24px;border-top:1px solid var(--border);width:100%;text-align:center;}
-  .stopwatch-num-big{font-family:'Big Shoulders Display',sans-serif;font-weight:700;font-size:5rem;line-height:1.05;margin-top:4px;}
+  .stopwatch-num-big{font-family:'Big Shoulders Display',sans-serif;font-weight:700;font-size:calc(var(--dial) * 80 / 230);line-height:1.05;margin-top:4px;} /* 80/230 = countdown font-size / dial viewBox, so both read the same size */
   .chart-legend{display:flex;flex-wrap:wrap;gap:8px 12px;margin-bottom:10px;}
   .chart-legend span{display:inline-flex;align-items:center;gap:5px;font-size:0.7rem;color:var(--muted);}
   .chart-legend i{width:9px;height:9px;border-radius:2px;display:inline-block;}

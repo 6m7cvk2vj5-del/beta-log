@@ -1756,7 +1756,7 @@ function renderTimerExpanded(){
   const r = 100, circumference = 2 * Math.PI * r;
   const frac = t.totalSeconds > 0 ? t.remainingSeconds / t.totalSeconds : 0;
   const offset = circumference * (1 - frac);
-  return `<div class="timer-expanded-overlay">
+  return `<div class="timer-expanded-overlay" onclick="if(event.target===this) toggleTimerExpanded()">
     <div class="timer-expanded-box">
       <button class="close-x" style="position:absolute;top:14px;right:14px;" onclick="toggleTimerExpanded()" title="Shrink">&times;</button>
       <button type="button" class="timer-dial-btn" onclick="toggleTimerPicker()" title="Choose time">
