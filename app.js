@@ -1136,8 +1136,17 @@ function computeWeakPointRadarData(){
   const latest = cs.latest;
   const previous = App.assessments.length >= 2 ? App.assessments[App.assessments.length - 2] : null;
   const adj = cs.adjustedAny;
-  const data = cats.map(c => {
-    const shown = adj ? cs.adjusted[c] : cs.raw[c];
+  const shownVals = cats.map(c => adj ? cs.adjusted[c] : cs.raw[c]);
+  const cmpVals = adj ? cats.map(c => cs.raw[c]) : (previous ? cats.map(c => previous.scores[c]) : null);
+  // Category averages sit close together (each is a mean of several answers), so on a fixed 0-5
+  // axis the shape barely moves. Scale the chart to the range you actually have: the edge is a bit
+  // above your highest category, the centre a bit below your lowest. Tapping an axis gives the real score.
+  const all = shownVals.concat(cmpVals || []);
+  let lo = Math.min(...all) - 0.4, hi = Math.max(...all) + 0.4;
+  if (hi - lo < 1.2) { const mid = (hi + lo) / 2; lo = mid - 0.6; hi = mid + 0.6; }
+  lo = Math.max(0, lo); hi = Math.min(5, hi);
+  const scale = v => Math.max(4, Math.round((v - lo) / (hi - lo) * 100));
+  const data = cats.map((c, i) => {
     let detail = `${catLabels[c]}: ${cs.raw[c].toFixed(1)} / 5 from your ${latest.date} check-in.`;
     if (adj && cs.adjusted[c] < cs.raw[c] - 0.04) detail = `${catLabels[c]}: ${cs.adjusted[c].toFixed(1)} / 5 after ${cs.breakdown.counts[c]} breakdown${cs.breakdown.counts[c]===1?'':'s'} in the last 30 days (check-in said ${cs.raw[c].toFixed(1)}).`;
     else if (previous) {
@@ -1145,13 +1154,11 @@ function computeWeakPointRadarData(){
       const trend = delta > 0.05 ? `Up from ${previous.scores[c].toFixed(1)}` : delta < -0.05 ? `Down from ${previous.scores[c].toFixed(1)}` : `About the same as ${previous.scores[c].toFixed(1)}`;
       detail += ` ${trend} on ${previous.date}.`;
     }
-    return { axis: catLabels[c], pct: Math.round(shown/5*100), value: shown, detail };
+    return { axis: catLabels[c], pct: scale(shownVals[i]), value: shownVals[i], detail };
   });
-  // With recent breakdowns the dashed outline is the check-in as answered; otherwise it is the
-  // previous check-in, as before.
-  const compareData = adj ? cats.map(c => ({ pct: Math.round(cs.raw[c]/5*100) }))
-    : (previous ? cats.map(c => ({ pct: Math.round(previous.scores[c]/5*100) })) : null);
-  return { data, compareData, latestDate: latest.date, previousDate: adj ? null : (previous ? previous.date : null), adjusted: adj };
+  const compareData = cmpVals ? cmpVals.map(v => ({ pct: scale(v) })) : null;
+  return { data, compareData, latestDate: latest.date, previousDate: adj ? null : (previous ? previous.date : null), adjusted: adj,
+    range: [lo, hi] };
 }
 
 // Where you stand on your own weekly guidelines — completed vs. not, nothing else. Pure
@@ -2581,7 +2588,7 @@ function renderRadarCarousel(radarData, focusRadarData, minutesHtml){
         ? `Comparing your ${wp.latestDate} check-in (solid, gold) against your ${wp.previousDate} check-in (dashed outline). Tap an axis for the numbers.`
         : 'From your most recent weak-point check-in. Take another to start seeing how this shifts over time. Tap an axis for the numbers.',
       chartId: 'weakPoint', data: wp.data, compareData: wp.compareData,
-      caption: wp.adjusted ? 'Gold: check-in adjusted by the last 30 days of breakdowns &middot; Dashed: as you answered it' : (wp.previousDate ? `Gold: ${wp.latestDate} &middot; Dashed: ${wp.previousDate}` : null),
+      caption: (wp.adjusted ? 'Gold: check-in adjusted by the last 30 days of breakdowns &middot; Dashed: as you answered it' : (wp.previousDate ? `Gold: ${wp.latestDate} &middot; Dashed: ${wp.previousDate}` : 'Gold: your latest check-in')) + `<br>Scaled to your own range (${wp.range[0].toFixed(1)} to ${wp.range[1].toFixed(1)} out of 5) so differences show. Tap an axis for the real score.`,
     });
     App.ui.radarData.weakPoint = wp.data;
   }
