@@ -16,6 +16,17 @@ const DAY_TYPES = ['Indoor','Outdoor','Bouldering','Sport/Rope','Project','Power
 const FAILURE_POINT_OPTIONS = ["Grip/forearms gave out","Footwork broke down","Lost the sequence","Couldn't commit to the move","Got pumped","Couldn't reach the hold","Feet cut loose","Mental — backed off"];
 // General tags for Strength/Antagonist (legs folded in here as a muscle group, not a separate type)
 // and Core, so logging doesn't require hunting through a long named-exercise list every time.
+// What broke down, for non-climbing workouts. Each tag maps to one of the check-in categories so
+// repeated breakdowns can move the weak-point profile (see getCategoryScores).
+const WORKOUT_BREAKDOWN_OPTIONS = ["Grip/forearms gave out","Shoulders gave out","Core gave out","Legs gave out","Lost form","Ran out of energy","Had to cut it short","Mental — lost focus"];
+const BREAKDOWN_CATEGORY = {
+  "Grip/forearms gave out":'physical', "Got pumped":'physical', "Shoulders gave out":'physical', "Core gave out":'physical',
+  "Legs gave out":'physical', "Ran out of energy":'physical', "Had to cut it short":'physical',
+  "Footwork broke down":'technique', "Lost the sequence":'technique', "Couldn't reach the hold":'technique',
+  "Feet cut loose":'technique', "Lost form":'technique',
+  "Couldn't commit to the move":'mental', "Mental — backed off":'mental', "Mental — lost focus":'mental',
+};
+function breakdownOptionsFor(type){ return type === 'Climbing' ? FAILURE_POINT_OPTIONS : WORKOUT_BREAKDOWN_OPTIONS; }
 const MUSCLE_GROUPS = ['Upper body push','Upper body pull','Legs','Grip/forearms','Full body'];
 const POWER_LEVELS = ['Max strength/heavy','Power/explosive','Endurance/high-rep','Stability/control'];
 const CORE_REGIONS = ['Upper abs','Lower abs','Obliques','Full core/anti-rotation'];
@@ -607,7 +618,7 @@ const App = {
   assessments: [],
   lastPlan: null, // the most recently generated plan, persisted so it survives a reload/close
   ui: { tab:'home', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
-        qDraft: {}, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planText:'',
+        qDraft: {}, qSubset:null, askStep:1, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planText:'',
         editingId:null, planFeedback:'', lastPlanContext:null,
         importLoading:false, importError:'', infoPopup:null, entriesShown:50, streaming:false, logMoreOpen:false, logExtraFields:[], radarData:{}, radarSlide:0, radarSlideCount:1, swapHistory:{},
         timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false, expanded:false },
@@ -677,7 +688,12 @@ const App = {
     this._toastTimer = setTimeout(()=>t.classList.remove('show'), 1800);
   },
 
-  setTab(tab) { this.ui.tab = tab; this.ui.settingsOpen = false; this.render(); },
+  // Arriving at Ask from another tab starts at step 1 of the questions, unless the caller already
+  // set up step 2 (e.g. jumping in with a focus area chosen).
+  setTab(tab, keepAskStep) {
+    if (tab === 'ask' && this.ui.tab !== 'ask' && !keepAskStep) this.ui.askStep = 1;
+    this.ui.tab = tab; this.ui.settingsOpen = false; this.render();
+  },
 };
 
 // UTC-based date strings are the wrong tool here: toISOString() converts to UTC first, so anyone
@@ -964,7 +980,8 @@ function tapRadarAxis(chartId, i){
   App.render();
 }
 function jumpToAskWithType(type){ App.ui.askDraft.sessionTypes = [type]; App.setTab('ask'); }
-function jumpToAskWithFocus(area){ App.ui.askDraft.focusMode = 'pick'; App.ui.askDraft.focusPick = area; App.setTab('ask'); }
+function jumpToAskWithFocus(area){ App.ui.askDraft.focusMode = 'pick'; App.ui.askDraft.focusPick = area; App.ui.askStep = 2; App.setTab('ask', true); }
+function setAskStep(n){ App.ui.askStep = n; App.render(); window.scrollTo(0,0); }
 
 // ---- Pattern detection (simple, transparent heuristics, day-based not entry-based) ----
 function detectPatterns(entries){
@@ -1031,19 +1048,53 @@ function detectPatterns(entries){
   return flags;
 }
 
+// Check-in scores (0-5, higher is better) as they stand today: the latest check-in, lowered a little
+// by what has actually broken down in the last 30 days. Each category loses up to 1.5 points in
+// proportion to how often it broke down per session, so a check-in answered months ago keeps moving.
+function getBreakdownSummary(days){
+  const todayMs = new Date(todayISO()).getTime();
+  const counts = { mental:0, technique:0, physical:0 }, labels = {};
+  let sessions = 0;
+  App.entries.forEach(e => {
+    const ago = daysAgoFrom(todayMs, e.date);
+    if (ago < 0 || ago >= (days || 30) || e.type === 'Rest') return;
+    sessions++;
+    arr(e.failurePoints).forEach(l => {
+      const c = BREAKDOWN_CATEGORY[l];
+      if (!c) return;
+      counts[c]++; labels[l] = (labels[l] || 0) + 1;
+    });
+  });
+  const total = counts.mental + counts.technique + counts.physical;
+  const top = Object.entries(labels).sort((a,b)=> b[1]-a[1]).slice(0,3);
+  return { counts, labels: top, sessions, total };
+}
+function getCategoryScores(){
+  const latest = App.assessments[App.assessments.length - 1];
+  if (!latest) return null;
+  const br = getBreakdownSummary(30);
+  const raw = {}, adjusted = {};
+  ['mental','technique','physical'].forEach(c => {
+    raw[c] = latest.scores[c];
+    const penalty = Math.min(1.5, 1.5 * br.counts[c] / Math.max(4, br.sessions)); // at least 4 sessions' worth, so two bad days can't zero a category
+    adjusted[c] = Math.max(0, raw[c] - penalty);
+  });
+  return { raw, adjusted, breakdown: br, latest, adjustedAny: br.total > 0 };
+}
 // Weak-point profile: lowest-scoring category from the most recent assessment,
 // blended with which FOCUS_AREAS have gotten the least attention in the log.
 function getWeakPointProfile(){
   const latest = App.assessments[App.assessments.length - 1];
   let categoryRank = null;
-  if (latest) {
-    categoryRank = Object.entries(latest.scores).sort((a,b)=> a[1]-b[1]);
+  const cs = getCategoryScores();
+  if (latest && cs) {
+    categoryRank = Object.entries(cs.adjusted).sort((a,b)=> a[1]-b[1]);
   }
   const counts = {};
   FOCUS_AREAS.forEach(a => counts[a] = 0);
   App.entries.forEach(e => arr(e.focus).forEach(a => { counts[a] = (counts[a]||0) + 1; }));
   const leastWorked = Object.entries(counts).sort((a,b)=> a[1]-b[1]).slice(0,3).map(x=>x[0]);
-  return { categoryRank, leastWorked };
+  return { categoryRank, leastWorked, breakdownLabels: cs ? cs.breakdown.labels : getBreakdownSummary(30).labels };
 }
 // Mental/technique/physical self-assessment as a radar, comparing your two most recent check-ins
 // so it shows actual movement over time rather than repeating the same bar-list a single check-in
@@ -1052,21 +1103,26 @@ function computeWeakPointRadarData(){
   if (App.assessments.length === 0) return null;
   const catLabels = { mental:'Mental', technique:'Technique', physical:'Physical' };
   const cats = ['mental','technique','physical'];
-  const latest = App.assessments[App.assessments.length - 1];
+  const cs = getCategoryScores();
+  const latest = cs.latest;
   const previous = App.assessments.length >= 2 ? App.assessments[App.assessments.length - 2] : null;
+  const adj = cs.adjustedAny;
   const data = cats.map(c => {
-    const score = latest.scores[c];
-    const pct = Math.round(score/5*100);
-    let detail = `${catLabels[c]}: ${score.toFixed(1)} / 5 as of your ${latest.date} check-in.`;
-    if (previous) {
-      const delta = score - previous.scores[c];
+    const shown = adj ? cs.adjusted[c] : cs.raw[c];
+    let detail = `${catLabels[c]}: ${cs.raw[c].toFixed(1)} / 5 from your ${latest.date} check-in.`;
+    if (adj && cs.adjusted[c] < cs.raw[c] - 0.04) detail = `${catLabels[c]}: ${cs.adjusted[c].toFixed(1)} / 5 after ${cs.breakdown.counts[c]} breakdown${cs.breakdown.counts[c]===1?'':'s'} in the last 30 days (check-in said ${cs.raw[c].toFixed(1)}).`;
+    else if (previous) {
+      const delta = cs.raw[c] - previous.scores[c];
       const trend = delta > 0.05 ? `Up from ${previous.scores[c].toFixed(1)}` : delta < -0.05 ? `Down from ${previous.scores[c].toFixed(1)}` : `About the same as ${previous.scores[c].toFixed(1)}`;
       detail += ` ${trend} on ${previous.date}.`;
     }
-    return { axis: catLabels[c], pct, value: score, detail };
+    return { axis: catLabels[c], pct: Math.round(shown/5*100), value: shown, detail };
   });
-  const compareData = previous ? cats.map(c => ({ pct: Math.round(previous.scores[c]/5*100) })) : null;
-  return { data, compareData, latestDate: latest.date, previousDate: previous ? previous.date : null };
+  // With recent breakdowns the dashed outline is the check-in as answered; otherwise it is the
+  // previous check-in, as before.
+  const compareData = adj ? cats.map(c => ({ pct: Math.round(cs.raw[c]/5*100) }))
+    : (previous ? cats.map(c => ({ pct: Math.round(previous.scores[c]/5*100) })) : null);
+  return { data, compareData, latestDate: latest.date, previousDate: adj ? null : (previous ? previous.date : null), adjusted: adj };
 }
 
 // Where you stand on your own weekly guidelines — completed vs. not, nothing else. Pure
@@ -1485,7 +1541,8 @@ async function askClaude(feedback){
     // is selected — it shouldn't disappear just because you picked a specific focus area instead.
     const mentalIsWeakest = !!(weak.categoryRank && weak.categoryRank[0][0] === 'mental');
     const weakPointLine = weak.categoryRank
-      ? `Weakest category from self-assessment: ${weak.categoryRank[0][0]} (avg ${weak.categoryRank[0][1].toFixed(1)}/5). Least-worked focus areas in the log: ${weak.leastWorked.join(', ')}.`
+      ? `Weakest category from self-assessment, adjusted by recent breakdowns: ${weak.categoryRank[0][0]} (${weak.categoryRank[0][1].toFixed(1)}/5). Least-worked focus areas in the log: ${weak.leastWorked.join(', ')}.` +
+        (weak.breakdownLabels.length ? ` What has broken down most in the last 30 days: ${weak.breakdownLabels.map(x => x[0] + ' x' + x[1]).join(', ')}.` : '')
       : 'No weak-point check-in taken yet.';
 
     let focusLine = '';
@@ -2481,11 +2538,13 @@ function renderRadarCarousel(radarData, focusRadarData, minutesHtml){
   if (wp) {
     slides.push({
       title: 'Self-assessment',
-      tooltip: wp.previousDate
+      tooltip: wp.adjusted
+        ? 'Your latest check-in, lowered a little in any area that has been breaking down in logged sessions over the last 30 days. Dashed = the check-in as you answered it. Tap an axis for the numbers.'
+        : wp.previousDate
         ? `Comparing your ${wp.latestDate} check-in (solid, gold) against your ${wp.previousDate} check-in (dashed outline). Tap an axis for the numbers.`
         : 'From your most recent weak-point check-in. Take another to start seeing how this shifts over time. Tap an axis for the numbers.',
       chartId: 'weakPoint', data: wp.data, compareData: wp.compareData,
-      caption: wp.previousDate ? `Gold: ${wp.latestDate} &middot; Dashed: ${wp.previousDate}` : null,
+      caption: wp.adjusted ? 'Gold: check-in adjusted by the last 30 days of breakdowns &middot; Dashed: as you answered it' : (wp.previousDate ? `Gold: ${wp.latestDate} &middot; Dashed: ${wp.previousDate}` : null),
     });
     App.ui.radarData.weakPoint = wp.data;
   }
@@ -2524,9 +2583,12 @@ function renderHome(){
     banners += `<div class="banner warn"><b>Pain still flagged:</b> ${escHtml(painStatus)}${getActivePainRegions(App.entries).length ? ' (' + escHtml(getActivePainRegions(App.entries).join(', ')) + ')' : ''} — from your most recent entry, sent with every plan request.
       <div style="margin-top:8px;"><button class="btn btn-ghost" style="width:auto;padding:8px 14px;" onclick="clearPainFlag()">Turn off — no pain today</button></div></div>`;
   }
-  if (dueCount >= 24) {
-    banners += `<div class="banner info"><b>Weak-point check-in due.</b> You've logged ${dueCount} climbing sessions since your last one.
-      <div style="margin-top:8px;"><button class="btn btn-secondary" onclick="openQuestionnaire()">Take the check-in (2 min)</button></div></div>`;
+  if (canQuickCheckin() ? dueCount >= QUICK_CHECKIN_EVERY : dueCount >= 24) {
+    banners += canQuickCheckin()
+      ? `<div class="banner info"><b>Quick check-in available.</b> ${dueCount} climbing sessions since your last one. Six questions, under a minute, and it keeps your profile current.
+        <div style="margin-top:8px;"><button class="btn btn-secondary" onclick="openQuestionnaire(true)">Take the quick check-in</button></div></div>`
+      : `<div class="banner info"><b>Weak-point check-in due.</b> You've logged ${dueCount} climbing sessions since your last one.
+        <div style="margin-top:8px;"><button class="btn btn-secondary" onclick="openQuestionnaire()">Take the check-in (2 min)</button></div></div>`;
   }
   flags.forEach(f => { banners += `<div class="banner warn">${escHtml(f)}</div>`; });
 
@@ -2603,7 +2665,8 @@ function renderHome(){
   const light = radarData.filter(d => d.target > 0 && d.value / d.target < 0.5);
   const weak = getWeakPointProfile();
   const focusParts = [phaseFocusLine(cycle.phaseName)];
-  if (weak.categoryRank) focusParts.push(`Weakest self-assessment area: ${weak.categoryRank[0][0]}.`);
+  if (weak.categoryRank) focusParts.push(`Weakest area: ${weak.categoryRank[0][0]}.`);
+  if (weak.breakdownLabels.length && weak.breakdownLabels[0][1] >= 2) focusParts.push(`Keeps breaking down on: ${weak.breakdownLabels[0][0].toLowerCase()}.`);
   const goingParts = [];
   if (onTrack.length) goingParts.push(`On track this week: ${names(onTrack)}.`);
   else goingParts.push('Nothing at goal yet this week.');
@@ -2660,15 +2723,39 @@ function renderAsk(){
     return `<div class="card"><p class="small muted">Set up your cycle on Home first.</p><button class="btn btn-primary" onclick="App.setTab('home')">Go to Home</button></div>`;
   }
   const d = App.ui.askDraft;
+  const step = App.ui.askStep === 2 ? 2 : 1;
   const weak = getWeakPointProfile();
   const weakOptionLabel = weak.categoryRank ? `Weakest area: ${weak.categoryRank[0][0]}` : null;
+  const feelingLabel = FEELING_SCALE.find(f => f.v === d.feeling).l;
+
+  if (step === 1) {
+    return `
+  ${renderBriefingCard()}
+  <div class="card">
+    <h2>What do you want to hit today?</h2>
+    <div class="field" style="margin-top:14px;"><label>Session type(s)</label>
+      ${pillsHTML(SESSION_TYPE_OPTIONS, d.sessionTypes, 'toggleAskType')}
+    </div>
+    ${stepperHTML({ label: 'Minutes available', value: d.minutes, max: 180, presets: ASK_MINUTE_PRESETS,
+      onStep: dl => `adjustAskMinutes(${dl})`, onSet: v => `setAskMinutes(${v})`, onType: 'typeAskMinutes(this.value)' })}
+    <div class="field"><label>How you're feeling</label>
+      ${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setAskFeeling')}
+      <div class="scale-caption" style="margin-top:2px;"><span>1 = flat</span><span>5 = dialed</span></div>
+    </div>
+    <button class="btn btn-primary" onclick="setAskStep(2)" ${d.sessionTypes.length ? '' : 'disabled'}>Next: details</button>
+    <button class="btn btn-ghost" style="margin-top:8px;" onclick="askClaude()" ${(App.ui.planLoading || !d.sessionTypes.length) ? 'disabled' : ''}>${App.ui.planLoading ? 'Thinking…' : 'Skip details, get the plan'}</button>
+    ${App.ui.planError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.planError)}</p>` : ''}
+  </div>`;
+  }
+
   return `
   ${renderBriefingCard()}
   <div class="card">
-    <h2>Ask for today's plan</h2>
-    <div class="field" style="margin-top:14px;"><label>Session type(s) wanted</label>
-      ${pillsHTML(SESSION_TYPE_OPTIONS, d.sessionTypes, 'toggleAskType')}
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;">
+      <h2 style="margin-bottom:6px;">A few details</h2>
+      <button type="button" onclick="setAskStep(1)" style="background:none;border:none;color:var(--gold);font-size:0.8rem;cursor:pointer;padding:0;">Change</button>
     </div>
+    <p class="small muted" style="margin:0 0 14px;">${escHtml(d.sessionTypes.join(' + ') || 'No type chosen')} &middot; ${d.minutes} min &middot; feeling ${escHtml(feelingLabel.toLowerCase())}</p>
     ${(d.sessionTypes.includes('Flexibility / Stretch') || d.sessionTypes.includes('Mobility')) ? `
     <div class="field"><label>Focus area (optional)</label>
       ${pillsHTML(MOBILITY_FOCUS_OPTIONS, d.mobilityFocus, 'toggleMobilityFocus', {sm:true})}
@@ -2682,19 +2769,19 @@ function renderAsk(){
       ${pillsHTML(FINGERS_ROUTINE_OPTIONS, d.routineStyle || "Coach's choice", 'setRoutineStyle', {sm:true})}
     </div>` : ''}
     ${d.sessionTypes.includes('Climbing') ? `
+    <div class="field"><label>Climbing today</label>
+      ${pillsHTML(['Bouldering','Rope'], d.climbDiscipline, 'setClimbDiscipline', {sm:true})}
+      <div style="margin-top:8px;">${pillsHTML(['Indoor','Outdoor'], d.climbLocation, 'setClimbPlace', {sm:true})}</div>
+    </div>
     <div class="field"><label>Climbing portion</label>
       ${pillsHTML(['Just play/climb', 'Give me a drill'], d.sessionStyle==='drill' ? 'Give me a drill' : 'Just play/climb', 'setSessionStyle', {sm:true})}
       ${d.sessionStyle==='drill' ? `<div style="margin-top:8px;">
         ${pillsHTML(['Technique','Fingers','Power','Power-Endurance','Endurance','Strength','Core','Legs','Injury Prevention','Mobility'], d.drillCategory, 'setDrillCategory', {sm:true})}
-        <p class="small muted" style="margin-top:6px;">${infoIcon("Optional: narrow it down. I'll name a specific drill from Training for Climbing or Climb to Fitness so you can look it up in your copy.")} What's this?</p>
+        <p class="small muted" style="margin-top:6px;">${infoIcon("Optional: narrow it down. I'll name a specific drill from your coach deck, Training for Climbing or Climb to Fitness.")} What's this?</p>
       </div>` : ''}
       <div style="margin-top:8px;">
         ${pillsHTML(['Make this mental-focused'], d.mentalFocus ? 'Make this mental-focused' : '', 'toggleMentalFocus', {sm:true})}
       </div>
-    </div>
-    <div class="field"><label>Climbing today</label>
-      ${pillsHTML(['Bouldering','Rope'], d.climbDiscipline, 'setClimbDiscipline', {sm:true})}
-      <div style="margin-top:8px;">${pillsHTML(['Indoor','Outdoor'], d.climbLocation, 'setClimbPlace', {sm:true})}</div>
     </div>` : ''}
     <div class="field"><label>Priority focus</label>
       ${pillsHTML(['Auto (weak points)', 'Pick a focus area', 'Describe something else'],
@@ -2707,13 +2794,8 @@ function renderAsk(){
     <div class="field"><label>Secondary focus (optional)</label>
       ${pillsHTML(FOCUS_AREAS, d.focusSecondary, 'setFocusSecondary', {sm:true})}
     </div>
-    ${stepperHTML({ label: 'Minutes available', value: d.minutes, max: 180, presets: ASK_MINUTE_PRESETS,
-      onStep: dl => `adjustAskMinutes(${dl})`, onSet: v => `setAskMinutes(${v})`, onType: 'typeAskMinutes(this.value)' })}
-    <div class="field"><label>How you're feeling</label>
-      ${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setAskFeeling')}
-      <div class="scale-caption" style="margin-top:2px;"><span>1 = flat</span><span>5 = dialed</span></div>
-    </div>
     <button class="btn btn-primary" onclick="askClaude()" ${App.ui.planLoading?'disabled':''}>${App.ui.planLoading ? 'Thinking…' : "Get today's plan"}</button>
+    <button class="btn btn-ghost" style="margin-top:8px;" onclick="setAskStep(1)">Back</button>
     ${App.ui.planError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.planError)}</p>` : ''}
   </div>`;
 }
@@ -2851,11 +2933,7 @@ function renderLog(){
       ${d.workoutStyles.map(style => `<div class="small muted" style="margin:8px 0 4px;">${escHtml(style)}</div>${pillsHTML(EXERCISE_LIBRARY[style]||[], d.exercisesDone, 'toggleLogExercise', {sm:true})}`).join('')}
     </div>` : ''}
     `}
-    ${isClimbing ? `
-    <div class="field"><label>What broke down</label>
-      ${pillsHTML(FAILURE_POINT_OPTIONS, d.failurePoints, 'toggleLogFailurePoint', {sm:true})}
-      <textarea class="autogrow" style="margin-top:8px;" placeholder="Any detail worth adding..." oninput="App.ui.logDraft.failurePointsOther=this.value; autoGrow(this)">${escHtml(d.failurePointsOther)}</textarea>
-    </div>` : ''}`;
+    `;
 
   const primaryField = primaryTimeFieldForType(d.type);
   const extraFields = App.ui.logExtraFields.filter(f => f !== primaryField);
@@ -2897,6 +2975,10 @@ function renderLog(){
       </div>
     </div>` : ''}
     ` : ''}
+    ${!isRest ? `<div class="field"><label>What broke down? (optional)${infoIcon("Tap whatever gave out. Repeated breakdowns nudge your weak-point profile on Home and feed the next plan.")}</label>
+      ${pillsHTML(breakdownOptionsFor(d.type), arr(d.failurePoints), 'toggleLogFailurePoint', {sm:true})}
+      ${(arr(d.failurePoints).length || d.failurePointsOther) ? `<textarea class="autogrow" style="margin-top:8px;" placeholder="Any detail worth adding..." oninput="App.ui.logDraft.failurePointsOther=this.value; autoGrow(this)">${escHtml(d.failurePointsOther)}</textarea>` : ''}
+    </div>` : ''}
     ${d.plan ? `<div class="field"><label>How closely did you follow the plan? (optional)</label>${pillsHTML(ADHERENCE_OPTIONS, d.planAdherence, 'setLogAdherence', {sm:true})}</div>` : ''}
     <div class="field"><label>Pain or discomfort</label>${pillsHTML(PAIN_OPTIONS, d.pain, 'setLogPain', {sm:true})}
       ${d.pain !== 'None' ? `<div style="margin-top:8px;"><div class="small muted" style="margin-bottom:6px;">Where? Plans will avoid exercises that load these.</div>${pillsHTML(PAIN_REGIONS, arr(d.painRegions), 'toggleLogPainRegion', {sm:true})}</div>` : ''}
@@ -3006,7 +3088,8 @@ function renderSettings(){
         <input type="text" placeholder="e.g. 5.10a" value="${escHtml(s.gradeOutdoor)}" oninput="App.settings.gradeOutdoor=this.value">
       </div>
     </div>
-    <button class="btn btn-secondary" onclick="openQuestionnaire()">Take weak-point check-in now</button>
+    ${canQuickCheckin() ? `<button class="btn btn-secondary" style="margin-bottom:8px;" onclick="openQuestionnaire(true)">Quick check-in (6 questions)</button>` : ''}
+    <button class="btn btn-${canQuickCheckin() ? 'ghost' : 'secondary'}" onclick="openQuestionnaire()">Full weak-point check-in (24 questions)</button>
   </div>
   <div class="card">
     <h2>Weekly goals${infoIcon("Minutes per week you're aiming for in each area. These set the dashed ring on Home's chart and the goal numbers under it. Taper weeks scale them down automatically.")}</h2>
@@ -3060,22 +3143,24 @@ function renderSettings(){
 }
 
 function renderQuestionnaire(){
-  const answered = Object.keys(App.ui.qDraft).length;
-  const items = QUESTIONS.map((q,i) => `
+  const subset = App.ui.qSubset;
+  const idx = subset || QUESTIONS.map((q,i) => i);
+  const answered = idx.filter(i => App.ui.qDraft[i] !== undefined).length;
+  const items = idx.map((i, n) => { const q = QUESTIONS[i]; return `
     <div class="q-item">
-      <div class="q-text">${i+1}. ${q.t}</div>
+      <div class="q-text">${n+1}. ${q.t}</div>
       <div class="scale-row">${[0,1,2,3,4,5].map(v => `<button type="button" class="scale-btn ${App.ui.qDraft[i]===v?'active':''}" onclick="setQAnswer(${i},${v})">${v}</button>`).join('')}</div>
       <div class="scale-caption"><span>Almost always</span><span>Never</span></div>
-    </div>`).join('');
+    </div>`; }).join('');
   return `
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;">
-      <h2>Weak-point check-in</h2>
+      <h2>${subset ? 'Quick check-in' : 'Weak-point check-in'}</h2>
       <button class="close-x" onclick="closeQuestionnaire()">&times;</button>
     </div>
-    <p class="small muted">${answered}/${QUESTIONS.length} answered. ${infoIcon('0 = almost always happens, 5 = never happens. Answer honestly, not aspirationally.')}</p>
+    <p class="small muted">${answered}/${idx.length} answered. ${infoIcon('0 = almost always happens, 5 = never happens. Answer honestly, not aspirationally.' + (subset ? ' A quick check-in asks a rotating 6 of the 24 questions and updates your scores from them.' : ''))}</p>
     ${items}
-    <button class="btn btn-primary" onclick="submitAssessment()" ${answered<QUESTIONS.length?'disabled':''}>Submit (${answered}/${QUESTIONS.length})</button>
+    <button class="btn btn-primary" onclick="submitAssessment()" ${answered<idx.length?'disabled':''}>Submit (${answered}/${idx.length})</button>
   </div>`;
 }
 
@@ -3106,7 +3191,9 @@ function setLogAdherence(v){ App.ui.logDraft.planAdherence = App.ui.logDraft.pla
 function setLogPain(v){ App.ui.logDraft.pain = v; if (v === 'None') App.ui.logDraft.painRegions = []; App.render(); }
 function toggleLogPainRegion(r){ App.ui.logDraft.painRegions = arr(App.ui.logDraft.painRegions).slice(); toggleArr(App.ui.logDraft.painRegions, r); App.render(); }
 function setLogType(t){
+  const wasClimbing = App.ui.logDraft.type === 'Climbing';
   App.ui.logDraft.type = t;
+  if (wasClimbing !== (t === 'Climbing')) App.ui.logDraft.failurePoints = []; // the option list differs between climbing and other work
   // Reset every time, not just when empty — otherwise a style/tag picked for a previous type
   // choice sticks around invisibly once the picker filters to the new type's relevant list.
   App.ui.logDraft.workoutStyles = TYPE_TO_WORKOUT_STYLE[t] ? [TYPE_TO_WORKOUT_STYLE[t]] : [];
@@ -3230,8 +3317,9 @@ function submitLog(){
     // carries default values for them — zero/clear them explicitly so stale defaults never leak
     // into day-aggregation for a day that had no actual climbing on it.
     entry.timeClimb = 0; entry.intensity = ''; entry.dayTypes = []; entry.focus = [];
-    entry.wallAngle = []; entry.holdTypes = []; entry.failurePoints = []; entry.failurePointsOther = ''; entry.climbs = [];
+    entry.wallAngle = []; entry.holdTypes = []; entry.climbs = [];
   }
+  if (entry.type === 'Rest') { entry.failurePoints = []; entry.failurePointsOther = ''; }
   if (entry.type !== 'Strength' && entry.type !== 'Antagonist / Stabilizer') { entry.muscleGroup = []; entry.powerLevel = ''; }
   if (entry.type !== 'Core Workout') { entry.coreRegion = []; entry.coreMovementType = []; }
   // Duration is never typed in separately — it's always the sum of the actual time-spent sliders.
@@ -3281,20 +3369,43 @@ function resetWeeklyGoals(){
 }
 function saveSettingsForm(){ App.saveSettings(); App.toast('Settings saved'); App.render(); }
 
-function openQuestionnaire(){ App.ui.qOpen = true; App.ui.qDraft = {}; App.render(); window.scrollTo(0,0); }
-function closeQuestionnaire(){ App.ui.qOpen = false; App.render(); }
+// A quick check-in asks 6 of the 24 questions (two per category) and rotates through all of them over
+// four quick check-ins, so the profile keeps moving without the full 24 each time. The answers drop
+// into the previous full set of answers and every score is recomputed from all 24.
+const QUICK_CHECKIN_EVERY = 8; // climbing days since the last check-in
+function quickCheckinIndices(){
+  const k = App.assessments.filter(a => a.quick).length % 4;
+  return [0,1,2,3,4,5].map(m => k + 4 * m);
+}
+function canQuickCheckin(){
+  const latest = App.assessments[App.assessments.length - 1];
+  return !!(latest && Array.isArray(latest.answers) && latest.answers.length === QUESTIONS.length);
+}
+function openQuestionnaire(quick){
+  App.ui.qOpen = true; App.ui.qDraft = {};
+  App.ui.qSubset = (quick === true && canQuickCheckin()) ? quickCheckinIndices() : null;
+  App.render(); window.scrollTo(0,0);
+}
+function closeQuestionnaire(){ App.ui.qOpen = false; App.ui.qSubset = null; App.render(); }
 function setQAnswer(i, v){ App.ui.qDraft[i] = v; App.render(); }
 
 function submitAssessment(){
-  const answers = QUESTIONS.map((q,i)=> App.ui.qDraft[i]);
+  const subset = App.ui.qSubset;
+  let answers;
+  if (subset && canQuickCheckin()) {
+    answers = App.assessments[App.assessments.length - 1].answers.slice();
+    subset.forEach(i => { answers[i] = App.ui.qDraft[i]; });
+  } else {
+    answers = QUESTIONS.map((q,i)=> App.ui.qDraft[i]);
+  }
   const totals = { mental:[], technique:[], physical:[] };
   QUESTIONS.forEach((q,i)=> totals[q.cat].push(answers[i]));
   const scores = {};
   Object.keys(totals).forEach(cat => { scores[cat] = totals[cat].reduce((a,b)=>a+b,0) / totals[cat].length; });
-  App.assessments.push({ id: uid(), date: todayISO(), gradeIndoor: App.settings.gradeIndoor, gradeOutdoor: App.settings.gradeOutdoor, answers, scores });
+  App.assessments.push({ id: uid(), date: todayISO(), gradeIndoor: App.settings.gradeIndoor, gradeOutdoor: App.settings.gradeOutdoor, answers, scores, quick: !!(subset && canQuickCheckin()) || undefined });
   App.saveAssessments();
-  App.ui.qOpen = false;
-  App.toast('Check-in saved');
+  App.ui.qOpen = false; App.ui.qSubset = null;
+  App.toast(subset ? 'Quick check-in saved' : 'Check-in saved');
   App.setTab('home');
 }
 
@@ -3386,7 +3497,7 @@ window.setFontSize = setFontSize; window.adjustLogTime = adjustLogTime; window.s
 window.adjustAskMinutes = adjustAskMinutes; window.setAskMinutes = setAskMinutes; window.typeAskMinutes = typeAskMinutes; window.removeLogTimeField = removeLogTimeField; window.addLogTimeField = addLogTimeField; window.setWeeklyGoal = setWeeklyGoal; window.resetWeeklyGoals = resetWeeklyGoals;
 window.setTheme = setTheme;
 window.openSettings = openSettings; window.closeSettings = closeSettings;
-window.openQuestionnaire = openQuestionnaire; window.closeQuestionnaire = closeQuestionnaire;
+window.openQuestionnaire = openQuestionnaire; window.quickCheckinIndices = quickCheckinIndices; window.canQuickCheckin = canQuickCheckin; window.closeQuestionnaire = closeQuestionnaire;
 window.setQAnswer = setQAnswer; window.submitAssessment = submitAssessment; window.askClaude = askClaude;
 window.applyPhaseOverride = applyPhaseOverride; window.exportData = exportData; window.importData = importData;
 window.clearPainFlag = clearPainFlag; window.editEntry = editEntry; window.cancelEdit = cancelEdit;
@@ -3394,7 +3505,7 @@ window.toggleLogWorkoutStyle = toggleLogWorkoutStyle; window.toggleLogExercise =
 window.deleteEntry = deleteEntry; window.openPlanAsPage = openPlanAsPage; window.savePlanAsImage = savePlanAsImage;
 window.saveGeneratedPlanToLog = saveGeneratedPlanToLog; window.searchExercise = searchExercise; window.setLogAdherence = setLogAdherence;
 window.showLastPlan = showLastPlan;
-window.setClimbDiscipline = setClimbDiscipline; window.setClimbPlace = setClimbPlace; window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
+window.setAskStep = setAskStep; window.setClimbDiscipline = setClimbDiscipline; window.setClimbPlace = setClimbPlace; window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
 window.toggleMentalFocus = toggleMentalFocus;
 window.sharePlan = sharePlan; window.toggleMobilityFocus = toggleMobilityFocus; window.toLocalISO = toLocalISO;
 window.setRoutineStyle = setRoutineStyle;
