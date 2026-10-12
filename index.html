@@ -50,6 +50,7 @@
     padding:10px 12px;color:var(--text);font-size:0.9rem;font-family:inherit;
   }
   textarea{min-height:60px;resize:vertical;}
+  textarea.autogrow{resize:none;overflow:hidden;min-height:84px;}
   .pillrow{display:flex;flex-wrap:wrap;gap:6px;}
   .pill{background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:7px 13px;color:var(--text);font-size:0.85rem;cursor:pointer;font-family:inherit;}
   .pill.sm{padding:6px 11px;font-size:0.8rem;}
@@ -83,12 +84,7 @@
     font-size:0.7rem;color:var(--muted);}
   .exercise-card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);
     border-left:3px solid var(--cat-default);border-radius:8px;padding:10px;margin-bottom:8px;}
-  .exercise-card.done{opacity:.55;}
-  .exercise-card.done .exercise-card-name{text-decoration:line-through;}
   .exercise-card-top{display:flex;align-items:flex-start;gap:10px;}
-  .exercise-check{width:34px;height:34px;flex:none;border-radius:8px;border:1.5px solid var(--border);background:var(--surface);
-    color:var(--teal);font-weight:700;font-size:1rem;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;}
-  .exercise-check.checked{background:var(--teal);color:#fff;border-color:var(--teal);}
   .exercise-card-main{flex:1;min-width:0;}
   .exercise-card-name{font-weight:600;font-size:0.85rem;}
   .exercise-card-detail{color:var(--muted);font-size:0.75rem;margin-top:2px;}

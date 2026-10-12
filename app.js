@@ -273,8 +273,8 @@ const App = {
   lastPlan: null, // the most recently generated plan, persisted so it survives a reload/close
   ui: { tab:'home', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
         qDraft: {}, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planText:'',
-        editingId:null, planFeedback:'', lastPlanContext:null, showAdherence:false, planAdherencePick:'',
-        importLoading:false, importError:'', infoPopup:null, entriesShown:50, streaming:false, doneExercises: new Set(), logMoreOpen:false, logExtraFields:[], radarData:{}, radarSlide:0, radarSlideCount:1, swapHistory:{},
+        editingId:null, planFeedback:'', lastPlanContext:null,
+        importLoading:false, importError:'', infoPopup:null, entriesShown:50, streaming:false, logMoreOpen:false, logExtraFields:[], radarData:{}, radarSlide:0, radarSlideCount:1, swapHistory:{},
         timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false, expanded:false },
         stopwatch: { elapsedSeconds:0, running:false, intervalId:null } },
 
@@ -327,8 +327,11 @@ const App = {
   saveSettings() { localStorage.setItem(LS.settings, JSON.stringify(this.settings)); },
   saveEntries() { this._entriesVersion++; localStorage.setItem(LS.entries, JSON.stringify(this.entries)); },
   saveAssessments() { localStorage.setItem(LS.assessments, JSON.stringify(this.assessments)); },
-  saveLastPlan(text, sessionTypes) {
-    this.lastPlan = { text, generatedAt: new Date().toISOString(), sessionTypes: sessionTypes || [] };
+  // `context` is the exact system prompt + user message the plan came from. Persisted with the plan
+  // so "Want to adjust this?" still sees the original request after a reload or a return via
+  // "See most recent workout" — in-memory only, the adjust would silently become a fresh plan.
+  saveLastPlan(text, sessionTypes, context) {
+    this.lastPlan = { text, generatedAt: new Date().toISOString(), sessionTypes: sessionTypes || [], context: context || null };
     try { localStorage.setItem(LS.lastPlan, JSON.stringify(this.lastPlan)); } catch(e){}
   },
 
@@ -368,7 +371,8 @@ function freshLogDraft(){
 }
 function freshAskDraft(){
   return { minutes:60, feeling:3, sessionTypes:['Climbing'], focusMode:'weak', focusPick:'', focusOther:'', focusSecondary:'',
-    sessionStyle:'play', drillCategory:'', mobilityFocus:[], routineStyle:'', mentalFocus:false };
+    sessionStyle:'play', drillCategory:'', mobilityFocus:[], routineStyle:'', mentalFocus:false,
+    climbDiscipline:'', climbLocation:'' };
 }
 const MOBILITY_FOCUS_OPTIONS = ['Hips','Shoulders','Thoracic spine/back','Ankles/feet','Wrists','Full body'];
 const FINGERS_ROUTINE_OPTIONS = ['HIT System (max-strength)','Repeaters','Hangboard ladders','Coach\'s choice'];
@@ -881,11 +885,11 @@ function savePlanAsImage(){
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   });
 }
-function setPlanAdherence(v){ App.ui.planAdherencePick = v; App.render(); }
 function showLastPlan(){
   if (!App.lastPlan) return;
-  if (App.ui.planText !== App.lastPlan.text) { App.ui.doneExercises = new Set(); App.ui.swapHistory = {}; } // genuinely different plan - fresh start; same plan you're returning to - keep progress
+  if (App.ui.planText !== App.lastPlan.text) App.ui.swapHistory = {}; // genuinely different plan - fresh start
   App.ui.planText = App.lastPlan.text;
+  App.ui.lastPlanContext = App.lastPlan.context || null;
   App.ui.planError = '';
   App.ui.planUnlocked = true;
   App.setTab('plan');
@@ -898,10 +902,10 @@ async function extractWorkoutData(text){
   if (!text || !text.trim()) throw new Error('There\u2019s no text to read.');
 
   const schema = `{
-  "type": one of "Climbing","Fingers","Antagonist / Stabilizer","Flexibility / Stretch","Strength","Cardio","Core Workout","Rest",
+  "type": one of "Climbing","Fingers","Antagonist / Stabilizer","Flexibility / Stretch","Mobility","Strength","Cardio","Core Workout","Rest",
   "date": "YYYY-MM-DD" if a date is mentioned, else null,
   "feeling": integer 1-5 if inferable from tone, else null,
-  "timeClimb": number, "timeFingers": number, "timeStrength": number, "timeAntag": number, "timeCore": number, "timeMobility": number, "timeCardio": number (minutes in each bucket that actually applies; 0 for the rest),
+  "timeClimb": number, "timeFingers": number, "timeStrength": number, "timeAntag": number, "timeCore": number, "timeFlexibility": number (static stretching/yoga), "timeMobility": number (rolling out, body prep, functional movement), "timeCardio": number (minutes in each bucket that actually applies; 0 for the rest),
   "intensity": one of "Easy","Moderate","Hard","Max effort", or null (climbing only),
   "dayTypes": array from ["Indoor","Outdoor","Bouldering","Sport/Rope","Project","Power","Power-Endurance","Skills/Technique","Fun/Social"] (climbing only),
   "climbs": array of {"grade":string, "count":number, "location":"Indoor" or "Outdoor"} (climbing only),
@@ -963,57 +967,23 @@ async function extractWorkoutData(text){
   return { fresh, climbsDraft };
 }
 
-// Which exercise line indices are NOT ticked as done, using the same identity key the checkbox
-// itself uses (full name including any internal qualifier, so "Lacrosse ball — pecs" and
-// "— forearms" are never confused for each other).
-function untickedExerciseIndices(text){
-  const lines = (text || '').split('\n');
-  const cls = classifyPlanLines(lines);
-  const indices = [];
-  lines.forEach((line, i) => {
-    if (cls[i] !== 'exercise') return;
-    const bulletMatch = line.match(/^(\s*(?:[-*•]|\d+[.)])\s+)(.*)$/);
-    if (!bulletMatch) return;
-    const body = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
-    const sepMatch = splitExerciseNameDetail(body);
-    const namePart = (sepMatch ? sepMatch[1] : body).trim();
-    if (!App.ui.doneExercises.has(namePart || body)) indices.push(i);
-  });
-  return indices;
-}
 // "Add this to today's log" — runs the plan text through the same extraction as a file import,
-// then drops you on the Log tab to review and adjust before it actually saves. If some exercises
-// are ticked and some aren't, confirms first that the unticked ones should be dropped before
-// logging — but only in that genuinely ambiguous case: nobody touching the checkboxes at all logs
-// the whole plan as always, and everything ticked has nothing to remove either way.
-function saveGeneratedPlanToLog(){
-  const unticked = untickedExerciseIndices(App.ui.planText);
-  if (App.ui.doneExercises.size > 0 && unticked.length > 0) {
-    App.ui.infoPopup = {
-      text: "I'll remove the unticked exercises before entering this — proceed?",
-      actionLabel: 'Proceed',
-      actionFn: 'confirmSaveGeneratedPlanToLog(true)',
-    };
-    App.render();
-    return;
-  }
-  confirmSaveGeneratedPlanToLog(false);
-}
-async function confirmSaveGeneratedPlanToLog(filterUnticked){
+// then opens the Log tab pre-filled so it can be glanced over and saved. One tap, no questions:
+// how closely the plan was followed is an optional pill on the Log screen instead of a gate here.
+async function saveGeneratedPlanToLog(){
   App.ui.importLoading = true; App.ui.importError = ''; App.render();
   try {
-    const textToUse = filterUnticked
-      ? removePlanLinesAt(App.ui.planText, new Set(untickedExerciseIndices(App.ui.planText)))
-      : App.ui.planText;
-    const { fresh, climbsDraft } = await extractWorkoutData(textToUse);
-    fresh.plan = textToUse;
-    fresh.planAdherence = App.ui.planAdherencePick;
+    const { fresh, climbsDraft } = await extractWorkoutData(App.ui.planText);
+    fresh.plan = App.ui.planText;
     App.ui.logDraft = fresh;
     App.ui.climbsDraft = climbsDraft;
+    // Surface every bucket the extraction put minutes in, same as editing an existing entry —
+    // otherwise a second bucket (e.g. antagonist alongside core) is saved but hidden on the form.
+    const primary = primaryTimeFieldForType(fresh.type);
+    App.ui.logExtraFields = TIME_FIELDS.filter(f => f !== primary && Number(fresh[f]) > 0);
     App.ui.editingId = null;
-    App.ui.showAdherence = false; App.ui.planAdherencePick = '';
     App.ui.importLoading = false; // clear before switching tabs, or the new tab renders stuck "loading"
-    App.toast('Extracted — review and save');
+    App.toast('Pre-filled from the plan — check and save');
     App.setTab('log');
   } catch(e) {
     App.ui.importError = 'Could not process the plan: ' + e.message;
@@ -1050,6 +1020,15 @@ async function askClaude(feedback){
       { role:'assistant', content: App.ui.planText },
       { role:'user', content: `Adjust that plan: ${feedback}` },
     ];
+  } else if (feedback) {
+    // A plan saved before the original request was being stored has no context to replay. Adjust
+    // what's on screen with a minimal brief rather than quietly generating an unrelated fresh plan.
+    sys = "You are an experienced rock climbing training coach. You're given a workout plan and a requested " +
+      "adjustment. Return the full adjusted plan in the same format: section headers (e.g. '### Warmup — 10 min') " +
+      "with short bullet lists of specific, individually-recognizable named exercises and rough sets/reps/durations. " +
+      "No fluff, no disclaimers. Change only what the adjustment implies.";
+    messages = [{ role:'user', content: `Current plan:\n\n${App.ui.planText}\n\nAdjust it: ${feedback}` }];
+    App.ui.lastPlanContext = { sys, userMsg: messages[0].content.split('\n\nAdjust it:')[0] };
   } else {
     const cycle = getCycleState(App.settings);
     const guidance = phaseGuidanceText(cycle.phaseName);
@@ -1143,26 +1122,25 @@ async function askClaude(feedback){
       "modalities (strength/antagonist/cardio/core/fingers/mobility). Don't default to climbing content just because " +
       "you're a climbing coach.\n\n" +
       "STRUCTURE REQUIREMENT, only when 'Climbing' IS among the requested session types: always include, in this " +
-      "order — (1) warmup off " +
-      "the wall — general movement prep to get the body ready (joint circles, activation drills, light dynamic " +
-      "stretching — not on-wall climbing), (2) light easy climbing as a second warmup phase, (3) the main climbing " +
-      "volume, (4) some near-limit/limit climbing, (5) climbing-related strength or power exercise, " +
-      "(6) a light health circuit, (7) cooldown/stabilizer " +
+      "order — (1) warmup off the wall — general movement prep to get the body ready (joint circles, activation " +
+      "drills, light dynamic stretching — not on-wall climbing), (2) finger/wrist/forearm/shoulder health work, " +
+      "which is the LAST part of the warmup and always comes before any climbing, (3) light easy climbing as a " +
+      "second warmup phase, (4) the main climbing volume, (5) some near-limit/limit climbing, (6) " +
+      "climbing-related strength or power exercise, (7) hip mobility/stability work and cooldown/stabilizer " +
       "work. That numbered list describes the STRUCTURE conceptually — it is not a template for output bullets. " +
-      "The health circuit in (6) actually covers two anatomically unrelated concerns — keep them clearly apart " +
-      "rather than one undifferentiated list: (6a) finger/wrist/forearm/shoulder maintenance — the grip-and-pull " +
-      "overuse-prevention side (hangboard health protocols, wrist mobility, shoulder external rotation) — and " +
-      "(6b) hip mobility/stability work, a completely different anatomical region tied to footwork and movement " +
-      "efficiency, not grip. A finger, hand, or wrist exercise never belongs under a hip-labeled section, and a hip " +
-      "exercise never belongs under the finger/forearm one — if you give these two pieces their own headers, keep " +
-      "every exercise under each header anatomically consistent with what that header is actually about. " +
+      "Pieces (2) and (7) cover two anatomically unrelated regions — keep them clearly apart: (2) is the " +
+      "grip-and-pull overuse-prevention side (hangboard health protocols, finger extensions, wrist mobility, " +
+      "shoulder external rotation), and (7) includes hip mobility/stability, a completely different region tied " +
+      "to footwork and movement efficiency, not grip. A finger, hand, or wrist exercise never belongs under a " +
+      "hip-labeled section, and a hip exercise never belongs under the finger/forearm one — every exercise " +
+      "under each header must be anatomically consistent with what that header is actually about. " +
       "Each of these seven pieces gets its own section header in what you write (e.g. '### Volume — 30 min'), never " +
       "a single bullet point summarizing the whole piece ('- Volume: climb 8-10 problems...' is wrong — a bullet is " +
       "always one specific, tappable thing, never a paragraph-level description of an entire phase). If a piece is " +
       "just a general instruction rather than a list of specific things, write it as a plain sentence under its " +
       "header, not as a bulleted list item. Never drop a piece, but vary the AMOUNT of each — how much climbing, how much antagonist/stabilizer, " +
       "how much cardio — based on the phase, time budget, and the patterns/weekly-rhythm notes below. The finger " +
-      "and forearm portion of that health circuit is NEVER optional and never gets cut for time, even on a short " +
+      "and forearm piece (2) is NEVER optional and never gets cut for time, even on a short " +
       "session — climbing is finger/forearm-dominant, and skipping this is exactly how those get overdeveloped and " +
       "chronically stressed relative to everything opposing them; a couple of minutes of finger extensions or wrist " +
       "mobility is enough on a tight day, but it must be there. Also include a brief mental-game component every " +
@@ -1228,6 +1206,10 @@ async function askClaude(feedback){
       `- Session type(s) wanted: ${d.sessionTypes.join(', ') || 'no preference'}\n- Priority focus: ${focusLine}\n` +
       (d.mobilityFocus.length ? `- Flexibility focus: ${d.mobilityFocus.join(', ')}\n` : '') +
       (d.routineStyle ? `- Requested routine: ${d.routineStyle} — build the session around this specific routine.\n` : '') +
+      (d.sessionTypes.includes('Climbing') && (d.climbDiscipline || d.climbLocation)
+        ? `- Climbing today: ${[d.climbDiscipline ? (d.climbDiscipline === 'Rope' ? 'rope climbing (route laps, not boulder problems)' : 'bouldering (problems, no rope laps)') : '', d.climbLocation ? d.climbLocation.toLowerCase() : ''].filter(Boolean).join(', ')}` +
+          (d.climbLocation === 'Outdoor' ? ' — no board/campus/gym-only tools; reference their outdoor grade.\n' : d.climbLocation === 'Indoor' ? ' — reference their indoor grade.\n' : '.\n')
+        : '') +
       (d.mentalFocus ? `- Explicitly requested a mental-heavy session today.\n` : '') +
       (mentalIsWeakest ? `- Mental is the weakest category from their self-assessment.\n` : '') + `\n` +
       (relevantExerciseBankText(d.sessionTypes, d.routineStyle) ? `Their own named exercise bank for today's relevant routines (see FORMAT REQUIREMENT below):\n${relevantExerciseBankText(d.sessionTypes, d.routineStyle)}\n\n` : '') +
@@ -1257,7 +1239,6 @@ async function askClaude(feedback){
     App.ui.planText = '';
     App.ui.planFeedback = '';
     App.ui.planError = '';
-    App.ui.doneExercises = new Set();
     App.ui.swapHistory = {};
     App.ui.streaming = true;
     App.ui.planUnlocked = true;
@@ -1295,7 +1276,7 @@ async function askClaude(feedback){
       App.render();
       return;
     }
-    App.saveLastPlan(text, App.ui.askDraft.sessionTypes);
+    App.saveLastPlan(text, App.ui.askDraft.sessionTypes, App.ui.lastPlanContext);
     App.render(); // final render swaps the plain streaming text for the full editable card view
   } catch(e) {
     App.ui.streaming = false;
@@ -1650,11 +1631,8 @@ function renderPlanEditable(text, interactive){
         </div>
       </div>`;
     }
-    const doneKey = namePart || body;
-    const isDone = App.ui.doneExercises.has(doneKey);
-    return `<div class="exercise-card${isDone?' done':''}" style="border-left-color:var(--cat-${category})">
+    return `<div class="exercise-card" style="border-left-color:var(--cat-${category})">
       <div class="exercise-card-top">
-        <button type="button" class="exercise-check${isDone?' checked':''}" onclick="toggleExerciseDone('${escAttr(doneKey)}')" title="Mark done">${isDone?'&#10003;':''}</button>
         <div class="exercise-card-main">
           <div class="exercise-card-name">${namePart ? `<span class="ex-link" onclick="searchExercise('${escAttr(namePart)}')">${nameHtml}</span>` : nameHtml}</div>
           ${restPart.trim() ? `<div class="exercise-card-detail">${escHtml(restPart.trim())}</div>` : ''}
@@ -1668,11 +1646,6 @@ function renderPlanEditable(text, interactive){
       </div>
     </div>`;
   }).join('');
-}
-function toggleExerciseDone(name){
-  if (App.ui.doneExercises.has(name)) App.ui.doneExercises.delete(name);
-  else App.ui.doneExercises.add(name);
-  App.render();
 }
 function toggleLogMore(){ App.ui.logMoreOpen = !App.ui.logMoreOpen; App.render(); }
 
@@ -1701,7 +1674,18 @@ App.render = function(){
         </div>`;
       })()
     : '';
+  autoGrowAll();
 };
+// iOS Safari has no drag handle for resize:vertical, so text boxes that should "just be big enough"
+// grow with their content instead. Re-applied after every render because innerHTML replacement
+// resets the height to the CSS minimum even when the box already holds a long draft.
+function autoGrow(el){
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+function autoGrowAll(){
+  document.querySelectorAll('textarea.autogrow').forEach(autoGrow);
+}
 function openSettings(){ App.ui.settingsOpen = true; App.render(); }
 function closeSettings(){ App.ui.settingsOpen = false; App.render(); }
 function infoIcon(text){ return `<button type="button" class="info-icon" onclick="event.stopPropagation(); showInfo('${escAttr(text)}')">i</button>`; }
@@ -2137,6 +2121,10 @@ function renderAsk(){
       <div style="margin-top:8px;">
         ${pillsHTML(['Make this mental-focused'], d.mentalFocus ? 'Make this mental-focused' : '', 'toggleMentalFocus', {sm:true})}
       </div>
+    </div>
+    <div class="field"><label>Climbing today</label>
+      ${pillsHTML(['Bouldering','Rope'], d.climbDiscipline, 'setClimbDiscipline', {sm:true})}
+      <div style="margin-top:8px;">${pillsHTML(['Indoor','Outdoor'], d.climbLocation, 'setClimbPlace', {sm:true})}</div>
     </div>` : ''}
     <div class="field"><label>Priority focus</label>
       ${pillsHTML(['Auto (weak points)', 'Pick a focus area', 'Describe something else'],
@@ -2144,7 +2132,7 @@ function renderAsk(){
         'setFocusMode', {sm:true})}
       ${d.focusMode==='weak' && weakOptionLabel ? `<p class="small muted" style="margin-top:6px;">${escHtml(weakOptionLabel)}</p>` : ''}
       ${d.focusMode==='pick' ? `<div style="margin-top:8px;">${pillsHTML(FOCUS_AREAS, d.focusPick, 'setFocusPick', {sm:true})}</div>` : ''}
-      ${d.focusMode==='other' ? `<textarea style="margin-top:8px;" placeholder="e.g. I struggle with laying back then getting my leg high and rocking over..." oninput="App.ui.askDraft.focusOther=this.value">${escHtml(d.focusOther)}</textarea>` : ''}
+      ${d.focusMode==='other' ? `<textarea class="autogrow" style="margin-top:8px;" placeholder="e.g. I struggle with laying back then getting my leg high and rocking over..." oninput="App.ui.askDraft.focusOther=this.value; autoGrow(this)">${escHtml(d.focusOther)}</textarea>` : ''}
     </div>
     <div class="field"><label>Secondary focus (optional)</label>
       ${pillsHTML(FOCUS_AREAS, d.focusSecondary, 'setFocusSecondary', {sm:true})}
@@ -2200,18 +2188,13 @@ function renderPlan(){
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="sharePlan()">Share / copy text</button>
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="openPlanAsPage()">Open as page (tap-to-search)</button>
       <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="savePlanAsImage()">Save as image</button>
-      <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="App.ui.showAdherence = !App.ui.showAdherence; App.render();">Add this to today's log</button>
+      <button class="btn btn-ghost" style="width:auto;padding:8px 12px;" onclick="saveGeneratedPlanToLog()" ${App.ui.importLoading ? 'disabled' : ''}>${App.ui.importLoading ? 'Reading the plan…' : "Add this to today's log"}</button>
     </div>
     <p class="small muted" style="margin-top:6px;">Export options ${infoIcon('Share / copy text is the fastest way into Notes, Messages, email, anywhere — on iPhone it opens the share sheet; elsewhere it copies to your clipboard. Tap any exercise name above to search it. Heads up: the image export is a flat picture — links only work in Open as page.')}</p>
-    ${App.ui.showAdherence ? `<div class="field" style="margin-top:10px;">
-      <label>If you already did it (or partly did it) — how close did you end up sticking to this?</label>
-      ${pillsHTML(ADHERENCE_OPTIONS, App.ui.planAdherencePick, 'setPlanAdherence', {sm:true})}
-      <button class="btn btn-secondary" style="margin-top:8px;" onclick="saveGeneratedPlanToLog()" ${(App.ui.planAdherencePick && !App.ui.importLoading) ? '' : 'disabled'}>${App.ui.importLoading ? 'Reading the plan…' : "Save to today's entry"}</button>
-      ${App.ui.importError ? `<p class="small" style="color:var(--red);margin-top:6px;">${escHtml(App.ui.importError)}</p>` : ''}
-    </div>` : ''}
+    ${App.ui.importError ? `<p class="small" style="color:var(--red);margin-top:6px;">${escHtml(App.ui.importError)}</p>` : ''}
     <div class="field" style="margin-top:12px;">
       <label>Want to adjust this?</label>
-      <textarea placeholder="e.g. swap the finger work for more core, I only actually have 30 min, less bouldering today..." oninput="App.ui.planFeedback=this.value; document.getElementById('regenBtn').disabled = !this.value.trim();">${escHtml(App.ui.planFeedback)}</textarea>
+      <textarea class="autogrow" placeholder="e.g. swap the finger work for more core, I only actually have 30 min, less bouldering today..." oninput="App.ui.planFeedback=this.value; autoGrow(this); document.getElementById('regenBtn').disabled = !this.value.trim();">${escHtml(App.ui.planFeedback)}</textarea>
       <button id="regenBtn" class="btn btn-secondary" style="margin-top:8px;" onclick="askClaude(App.ui.planFeedback)" ${App.ui.planLoading || !App.ui.planFeedback.trim() ? 'disabled' : ''}>${App.ui.planLoading ? 'Thinking…' : 'Regenerate with this feedback'}</button>
     </div>
   </div>
@@ -2273,7 +2256,7 @@ function renderLog(){
     ${isClimbing ? `
     <div class="field"><label>What broke down</label>
       ${pillsHTML(FAILURE_POINT_OPTIONS, d.failurePoints, 'toggleLogFailurePoint', {sm:true})}
-      <textarea style="margin-top:8px;" placeholder="Any detail worth adding..." oninput="App.ui.logDraft.failurePointsOther=this.value">${escHtml(d.failurePointsOther)}</textarea>
+      <textarea class="autogrow" style="margin-top:8px;" placeholder="Any detail worth adding..." oninput="App.ui.logDraft.failurePointsOther=this.value; autoGrow(this)">${escHtml(d.failurePointsOther)}</textarea>
     </div>` : ''}`;
 
   const primaryField = primaryTimeFieldForType(d.type);
@@ -2316,6 +2299,7 @@ function renderLog(){
       </div>
     </div>` : ''}
     ` : ''}
+    ${d.plan ? `<div class="field"><label>How closely did you follow the plan? (optional)</label>${pillsHTML(ADHERENCE_OPTIONS, d.planAdherence, 'setLogAdherence', {sm:true})}</div>` : ''}
     <div class="field"><label>Pain or discomfort</label>${pillsHTML(PAIN_OPTIONS, d.pain, 'setLogPain', {sm:true})}</div>
     ${!isRest ? `
     <button type="button" onclick="toggleLogMore()" style="background:none;border:none;color:var(--gold);font-size:0.8rem;padding:4px 0;cursor:pointer;margin-top:6px;">
@@ -2324,7 +2308,7 @@ function renderLog(){
     ${moreOpen ? moreDetailFields : ''}
     ` : ''}
     <div class="field" style="margin-top:14px;"><label>Notes</label>
-      <textarea placeholder="Anything else worth remembering..." oninput="App.ui.logDraft.notes=this.value">${escHtml(d.notes)}</textarea>
+      <textarea class="autogrow" placeholder="Anything else worth remembering..." oninput="App.ui.logDraft.notes=this.value; autoGrow(this)">${escHtml(d.notes)}</textarea>
     </div>
     <button class="btn btn-primary" onclick="submitLog()">${editing ? 'Save changes' : 'Save entry'}</button>
   </div>`;
@@ -2479,6 +2463,8 @@ function renderQuestionnaire(){
 }
 
 // ---- Event handlers (called from inline onclick in templates) ----
+function setClimbDiscipline(v){ App.ui.askDraft.climbDiscipline = App.ui.askDraft.climbDiscipline === v ? '' : v; App.render(); }
+function setClimbPlace(v){ App.ui.askDraft.climbLocation = App.ui.askDraft.climbLocation === v ? '' : v; App.render(); }
 function setAskFeeling(v){ App.ui.askDraft.feeling = Number(v); App.render(); }
 function toggleAskType(t){ const arr = App.ui.askDraft.sessionTypes; const i = arr.indexOf(t);
   if (i>-1) arr.splice(i,1); else arr.push(t); App.ui.askDraft.routineStyle = ''; App.render(); }
@@ -2499,6 +2485,7 @@ function toggleMentalFocus(){ App.ui.askDraft.mentalFocus = !App.ui.askDraft.men
 
 function setLogFeeling(v){ App.ui.logDraft.feeling = Number(v); App.render(); }
 function setLogIntensity(v){ App.ui.logDraft.intensity = v; App.render(); }
+function setLogAdherence(v){ App.ui.logDraft.planAdherence = App.ui.logDraft.planAdherence === v ? '' : v; App.render(); }
 function setLogPain(v){ App.ui.logDraft.pain = v; App.render(); }
 function setLogType(t){
   App.ui.logDraft.type = t;
@@ -2751,8 +2738,7 @@ window.toggleTimerPicker = toggleTimerPicker; window.TIMER_PRESETS = TIMER_PRESE
 window.toggleTimerExpanded = toggleTimerExpanded;
 window.toggleStopwatch = toggleStopwatch; window.resetStopwatch = resetStopwatch;
 window.removePlanLine = removePlanLine; window.movePlanLine = movePlanLine; window.swapPlanLine = swapPlanLine;
-window.toggleExerciseDone = toggleExerciseDone;
-window.toggleLogMore = toggleLogMore;
+window.toggleLogMore = toggleLogMore; window.autoGrow = autoGrow;
 window.cancelGeneration = cancelGeneration;
 window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
 window.EXERCISE_LIBRARY = EXERCISE_LIBRARY; window.WORKOUT_STYLES = WORKOUT_STYLES;
@@ -2774,9 +2760,9 @@ window.applyPhaseOverride = applyPhaseOverride; window.exportData = exportData; 
 window.clearPainFlag = clearPainFlag; window.editEntry = editEntry; window.cancelEdit = cancelEdit;
 window.toggleLogWorkoutStyle = toggleLogWorkoutStyle; window.toggleLogExercise = toggleLogExercise;
 window.deleteEntry = deleteEntry; window.openPlanAsPage = openPlanAsPage; window.savePlanAsImage = savePlanAsImage;
-window.saveGeneratedPlanToLog = saveGeneratedPlanToLog; window.confirmSaveGeneratedPlanToLog = confirmSaveGeneratedPlanToLog; window.searchExercise = searchExercise; window.setPlanAdherence = setPlanAdherence;
+window.saveGeneratedPlanToLog = saveGeneratedPlanToLog; window.searchExercise = searchExercise; window.setLogAdherence = setLogAdherence;
 window.showLastPlan = showLastPlan;
-window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
+window.setClimbDiscipline = setClimbDiscipline; window.setClimbPlace = setClimbPlace; window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
 window.toggleMentalFocus = toggleMentalFocus;
 window.sharePlan = sharePlan; window.toggleMobilityFocus = toggleMobilityFocus; window.toLocalISO = toLocalISO;
 window.setRoutineStyle = setRoutineStyle;
