@@ -554,7 +554,7 @@ function computeWeeklyRadarData(entries){
     const pct = target > 0 ? Math.min(150, Math.round((value / target) * 100)) : (value > 0 ? 100 : 0);
     return {
       axis: a.label, pct, value, target,
-      detail: `${a.label}: ${value} of ${target} min this week (${pct}%).`,
+      detail: target > 0 ? `${a.label}: ${value} min of your ${target} min goal over the last 7 days (${pct}%).` : `${a.label}: ${value} min over the last 7 days (no goal set).`,
       actionLabel: `Ask for a ${a.label.toLowerCase()} session`,
       actionFn: `jumpToAskWithType('${RADAR_KEY_TO_SESSION_TYPE[a.key]}')`,
     };
@@ -1078,6 +1078,7 @@ async function askClaude(feedback){
         if (cmt.length) bits.push('core movement: ' + cmt.join(', '));
         if (e.plan && e.planAdherence) bits.push('followed a generated plan: ' + e.planAdherence);
         if (e.notes) bits.push('notes: "' + e.notes + '"');
+        if (e.feeling) bits.push('felt: ' + e.feeling + '/5');
         return bits.length ? `  [${e.type}] ${bits.join('; ')}` : '';
       }).filter(Boolean).join('\n');
       return `${d.date}: ${parts.join(', ')}` + (entryDetails ? '\n' + entryDetails : '');
@@ -1200,6 +1201,13 @@ async function askClaude(feedback){
       "stay core-focused throughout rather than wandering across unrelated categories; a single deliberate new " +
       "block (e.g. one drill or one stretch style not in their usual rotation) is good for variety, scattering " +
       "many unrelated things across one session is not.\n\n" +
+      "HOW THEY FEEL TODAY (the 'Feeling' line, 1-5) must visibly shape the plan, not just be noted: at 1-2 " +
+      "(Flat/Off) cut intensity and volume, leave out near-limit and max-effort work, lean toward technique, " +
+      "mobility and easy movement, and say in one short line that you did this; at 3 (Steady) give the phase's " +
+      "normal prescription; at 4-5 (Strong/Dialed) it's a good day for the phase's hard work if the phase calls " +
+      "for it, so don't hold back for the sake of it. The recent log also shows how earlier sessions felt — a run " +
+      "of low scores is a reason to back off even if today's rating is middling. Still respect the minutes budget " +
+      "and any pain.\n\n" +
       "'Current pain status' line is the authoritative, most recent state — if it says None, do not dwell on older " +
       "pain mentions elsewhere in the log; if it says anything else, do not prescribe exercise for the affected area, " +
       "recommend rest and seeing a doctor or physical therapist instead, and only plan around unaffected areas if " +
@@ -1908,18 +1916,9 @@ function renderWeakPointRadarCardStandalone(){
     ${wp.previousDate ? `<p class="small muted" style="text-align:center;margin-top:6px;">Gold: ${escHtml(wp.latestDate)} &middot; Dashed: ${escHtml(wp.previousDate)}</p>` : ''}
   </div>`;
 }
-// Plain list under the weekly radar: what was done against what you're aiming for, in minutes —
-// the chart only shows proportions, this is the actual numbers.
-function renderGoalList(radarData){
-  return `<div class="goal-list">${radarData.map(d => {
-    const met = d.target > 0 && d.value >= d.target;
-    return `<div class="goal-row${met ? ' met' : ''}"><span>${escHtml(d.axis)}</span><span><b>${d.value}</b>${d.target > 0 ? ` / ${d.target}` : ''} min</span></div>`;
-  }).join('')}</div>
-  <p class="small muted" style="margin-top:8px;">Goals are adjustable in Settings. Taper weeks scale them down.</p>`;
-}
 function renderRadarCarousel(radarData, focusRadarData, minutesHtml){
   const slides = [
-    { title: 'Last 7 days vs. your goals', tooltip: 'Minutes in each area over the trailing 7 days. Dashed ring = your weekly goal; gold = what you did. Tap an axis for the numbers.', chartId: 'weeklyBalance', data: radarData, below: renderGoalList(radarData) },
+    { title: 'Last 7 days vs. your goals', tooltip: 'Minutes in each area over the trailing 7 days. Dashed ring = your weekly goal; gold = what you did. Tap an axis for the minutes. Goals are adjustable in Settings, and taper weeks scale them down.', chartId: 'weeklyBalance', data: radarData, below: `<p class="small muted" style="text-align:center;margin-top:6px;">Tap an axis for minutes against your goal.</p>` },
     { title: 'Minutes, last 14 days', tooltip: 'Each logged day, stacked by what you actually did.', html: minutesHtml },
     { title: 'Focus area attention', tooltip: 'Last 10 days of logged sessions — the same window used when referencing your recent history for a plan request. Tap an axis for the numbers.', chartId: 'focusAttention', data: focusRadarData },
   ];
@@ -2042,19 +2041,19 @@ function renderHome(){
   App.ui.radarData.focusAttention = focusRadarData;
   const minutesHtml = `<div class="chart-legend" style="margin-top:2px;">${legend}</div><div class="barlist">${minBars}</div>`;
 
-  // Where you are, in a few plain lines: the phase's focus, then how the last 7 days actually went
-  // against your own goals (counted straight from the radar data, nothing estimated).
-  const last7Days = days.filter(d => { const ago = daysAgoFrom(new Date(todayISO()).getTime(), d.date); return ago >= 0 && ago < 7; });
-  const activeDays7 = last7Days.filter(d => classifyDay(d) !== 'Rest').length;
-  const minutes7 = last7Days.reduce((sum, d) => sum + d.totalMinutes, 0);
-  const atGoal = radarData.filter(d => d.target > 0 && d.value >= d.target).length;
-  const furthest = radarData.filter(d => d.target > 0 && d.value < d.target)
-    .sort((a,b) => (a.value/a.target) - (b.value/b.target)).slice(0, 2);
+  // Where you are, in plain words: the phase's focus, then a number-free read on the last 7 days.
+  // The actual minutes are one tap away on the chart; this card stays glanceable.
+  const names = list => list.slice(0, 3).map(d => d.axis.toLowerCase()).join(', ');
+  const onTrack = radarData.filter(d => d.target > 0 && d.value >= d.target);
+  const light = radarData.filter(d => d.target > 0 && d.value / d.target < 0.5);
   const weak = getWeakPointProfile();
   const focusParts = [phaseFocusLine(cycle.phaseName)];
   if (weak.categoryRank) focusParts.push(`Weakest self-assessment area: ${weak.categoryRank[0][0]}.`);
-  const goingLine = `Last 7 days: ${activeDays7} active day${activeDays7===1?'':'s'}, ${minutes7} min, ${atGoal} of ${radarData.length} areas at goal.` +
-    (furthest.length ? ` Furthest below: ${furthest.map(d => `${d.axis.toLowerCase()} ${d.value}/${d.target}`).join(', ')} min.` : '');
+  const goingParts = [];
+  if (onTrack.length) goingParts.push(`On track this week: ${names(onTrack)}.`);
+  else goingParts.push('Nothing at goal yet this week.');
+  if (light.length) goingParts.push(`Light so far: ${names(light)}.`);
+  const goingLine = goingParts.join(' ');
 
   return `
   <div class="card">
@@ -2153,10 +2152,8 @@ function renderAsk(){
     <div class="field"><label>Secondary focus (optional)</label>
       ${pillsHTML(FOCUS_AREAS, d.focusSecondary, 'setFocusSecondary', {sm:true})}
     </div>
-    <div class="field"><label>Minutes available: <b id="slider_askMinutes_val">${d.minutes}</b> min</label>
-      <input type="range" min="10" max="180" step="5" value="${d.minutes}"
-        oninput="App.ui.askDraft.minutes=Number(this.value); document.getElementById('slider_askMinutes_val').textContent=this.value;">
-    </div>
+    ${stepperHTML({ label: 'Minutes available', value: d.minutes, max: 180, presets: ASK_MINUTE_PRESETS,
+      onStep: dl => `adjustAskMinutes(${dl})`, onSet: v => `setAskMinutes(${v})`, onType: 'typeAskMinutes(this.value)' })}
     <div class="field"><label>How you're feeling</label>
       ${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setAskFeeling')}
       <div class="scale-caption" style="margin-top:2px;"><span>1 = flat</span><span>5 = dialed</span></div>
@@ -2217,14 +2214,42 @@ function renderPlan(){
   <div class="timer-spacer"></div>`;
 }
 
-function sliderRow(label, field, value, max, removable){
-  max = max || 120;
-  const id = 'slider_' + field;
-  return `<div class="field"><label>${label}: <b id="${id}_val">${value}</b> min${removable ? ` <button type="button" onclick="removeLogTimeField('${field}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.75rem;padding:0 0 0 6px;">&times; remove</button>` : ''}</label>
-    <input type="range" min="0" max="${max}" step="5" value="${value}"
-      oninput="App.ui.logDraft.${field}=Number(this.value); document.getElementById('${id}_val').textContent=this.value;">
+// Minutes are entered with +/- buttons, quick presets and a typeable number. A range slider is
+// too coarse to land on a specific value with a thumb, especially on a phone.
+const TIME_PRESETS = [10, 15, 20, 30, 45, 60, 90];
+const ASK_MINUTE_PRESETS = [20, 30, 45, 60, 75, 90, 120];
+function stepperHTML(o){
+  const presets = o.presets.map(v => `<button type="button" class="pill sm${o.value === v ? ' active' : ''}" onclick="${o.onSet(v)}">${v}</button>`).join('');
+  return `<div class="field"><label>${o.label}${o.onRemove ? ` <button type="button" onclick="${o.onRemove}" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.75rem;padding:0 0 0 6px;">&times; remove</button>` : ''}</label>
+    <div class="stepper">
+      <button type="button" class="step-btn" onclick="${o.onStep(-5)}" aria-label="5 minutes less">&minus;</button>
+      <div class="step-val"><input type="number" inputmode="numeric" min="0" max="${o.max}" value="${o.value}"
+        oninput="${o.onType}" aria-label="${escHtml(o.label)} minutes"><span class="muted small">min</span></div>
+      <button type="button" class="step-btn" onclick="${o.onStep(5)}" aria-label="5 minutes more">+</button>
+    </div>
+    <div class="pillrow" style="margin-top:8px;">${presets}</div>
   </div>`;
 }
+function timeStepperRow(label, field, value, removable){
+  return stepperHTML({
+    label, value, max: 300, presets: TIME_PRESETS,
+    onStep: d => `adjustLogTime('${field}',${d})`,
+    onSet: v => `setLogTime('${field}',${v})`,
+    onType: `typeLogTime('${field}',this.value)`,
+    onRemove: removable ? `removeLogTimeField('${field}')` : '',
+  });
+}
+function clampMinutes(v, max){ return Math.max(0, Math.min(max, Math.round(Number(v) || 0))); }
+function adjustLogTime(field, delta){
+  App.ui.logDraft[field] = clampMinutes((Number(App.ui.logDraft[field]) || 0) + delta, 300);
+  App.render();
+}
+function setLogTime(field, v){ App.ui.logDraft[field] = clampMinutes(v, 300); App.render(); }
+// Typing updates the draft without a re-render, so the keyboard and caret stay put.
+function typeLogTime(field, v){ App.ui.logDraft[field] = clampMinutes(v, 300); }
+function adjustAskMinutes(delta){ App.ui.askDraft.minutes = Math.max(10, Math.min(180, (Number(App.ui.askDraft.minutes) || 60) + delta)); App.render(); }
+function setAskMinutes(v){ App.ui.askDraft.minutes = Math.max(10, Math.min(180, Math.round(Number(v) || 60))); App.render(); }
+function typeAskMinutes(v){ const n = Math.round(Number(v)); if (n >= 1) App.ui.askDraft.minutes = Math.min(180, n); }
 function primaryTimeFieldForType(type){
   return type === 'Climbing' ? 'timeClimb' : (TYPE_TO_TIME_FIELD[type] || null);
 }
@@ -2306,8 +2331,8 @@ function renderLog(){
     </div>` : ''}
     ${!isRest ? `
     <h3>Time spent${infoIcon('Total time for the entry is just the sum of these — no separate total to keep in sync. If today was genuinely more than one thing (e.g. core plus antagonist work), use the option below to add another instead of logging a second entry.')}</h3>
-    ${primaryField ? sliderRow(TIME_BUCKET_LABELS[primaryField], primaryField, d[primaryField], primaryField==='timeClimb'?180:120) : ''}
-    ${extraFields.map(f => sliderRow(TIME_BUCKET_LABELS[f], f, d[f], 120, true)).join('')}
+    ${primaryField ? timeStepperRow(TIME_BUCKET_LABELS[primaryField], primaryField, d[primaryField], false) : ''}
+    ${extraFields.map(f => timeStepperRow(TIME_BUCKET_LABELS[f], f, d[f], true)).join('')}
     ${availableToAdd.length ? `<div class="field">
       <label class="small muted" style="text-transform:none;">Also include...</label>
       <div class="pillrow" style="margin-top:6px;">
@@ -2788,7 +2813,8 @@ window.toggleLogDayType = toggleLogDayType; window.toggleLogFailurePoint = toggl
 window.setClimbLocation = setClimbLocation;
 window.addClimbRow = addClimbRow; window.removeClimbRow = removeClimbRow; window.submitLog = submitLog;
 window.toggleEntry = toggleEntry; window.showMoreEntries = showMoreEntries; window.toggleAssessment = toggleAssessment; window.toggleLagging = toggleLagging; window.setCycleType = setCycleType; window.saveSettingsForm = saveSettingsForm;
-window.setFontSize = setFontSize; window.setWeeklyGoal = setWeeklyGoal; window.resetWeeklyGoals = resetWeeklyGoals;
+window.setFontSize = setFontSize; window.adjustLogTime = adjustLogTime; window.setLogTime = setLogTime; window.typeLogTime = typeLogTime;
+window.adjustAskMinutes = adjustAskMinutes; window.setAskMinutes = setAskMinutes; window.typeAskMinutes = typeAskMinutes; window.removeLogTimeField = removeLogTimeField; window.addLogTimeField = addLogTimeField; window.setWeeklyGoal = setWeeklyGoal; window.resetWeeklyGoals = resetWeeklyGoals;
 window.setTheme = setTheme;
 window.openSettings = openSettings; window.closeSettings = closeSettings;
 window.openQuestionnaire = openQuestionnaire; window.closeQuestionnaire = closeQuestionnaire;

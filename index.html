@@ -51,6 +51,12 @@
   }
   textarea{min-height:60px;resize:vertical;}
   textarea.autogrow{resize:none;overflow:hidden;min-height:84px;}
+  .stepper{display:flex;align-items:center;gap:10px;}
+  .step-btn{width:48px;height:48px;flex:none;border-radius:10px;border:1.5px solid var(--border);background:var(--surface2);
+    color:var(--text);font-size:1.4rem;line-height:1;padding:0;cursor:pointer;font-family:inherit;}
+  .step-btn:active{background:var(--border);}
+  .step-val{flex:1;display:flex;align-items:baseline;justify-content:center;gap:6px;}
+  .step-val input{width:90px;text-align:center;font-size:1.3rem;font-weight:600;padding:8px 6px;}
   .pillrow{display:flex;flex-wrap:wrap;gap:6px;}
   .pill{background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:7px 13px;color:var(--text);font-size:0.85rem;cursor:pointer;font-family:inherit;}
   .pill.sm{padding:6px 11px;font-size:0.8rem;}
@@ -68,10 +74,6 @@
   .banner{border-radius:10px;padding:12px 14px;font-size:0.85rem;margin-bottom:14px;border:1px solid;}
   .banner.info{background:rgba(var(--gold-rgb),.14);border-color:var(--gold);}
   .banner.warn{background:rgba(var(--red-rgb),.16);border-color:var(--red);}
-  .goal-list{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;margin-top:12px;}
-  .goal-row{display:flex;justify-content:space-between;gap:8px;font-size:0.8rem;color:var(--muted);border-bottom:1px solid var(--border);padding:4px 0;}
-  .goal-row b{color:var(--text);}
-  .goal-row.met b{color:var(--teal);}
   .phase-banner{display:flex;justify-content:space-between;align-items:center;}
   .phase-name{font-family:'Big Shoulders Display',sans-serif;font-size:1.25rem;font-weight:800;}
   .phase-breakdown{margin-top:10px;display:flex;flex-direction:column;gap:5px;}
