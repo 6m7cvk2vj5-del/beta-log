@@ -281,6 +281,63 @@ const DRILL_LIBRARY = [
   {t:'Shoulder and Hip Strengthening', book:'Climb to Fitness', cat:'Mobility'},
 ];
 
+// Coach deck: technique and warm-up drills with short descriptions, written for this app (names are
+// the common ones coaches use; descriptions are paraphrased, not copied). Plans pick from here by exact
+// name for the easy-climbing warmup and the technique/limit portions, and the plan screen can regenerate
+// a climbing section from it. Add your coach's own drills here. cats: warmup, footwork, control,
+// technique, play.
+const COACH_DECK = [
+  {t:'Sloth & Monkey', cats:['warmup','control'], dose:'3 easy problems, each twice',
+   d:'Climb each problem once as slowly and statically as you can (sloth), then once with big, swingy dynamic movement (monkey). Notice which style feels less natural and spend a little extra time there.'},
+  {t:'Three-finger sloth', cats:['warmup','control'], dose:'1-2 easy jug problems',
+   d:'Climb slowly using only the middle three fingers on each hold, hands open and extended, arms as straight as you can keep them. Builds an efficient, relaxed grab.'},
+  {t:'Robot drill', cats:['warmup','control','technique'], dose:'2-3 easy problems',
+   d:'Move one limb at a time. The rest of the body stays completely still until that limb has settled on the next hold or position, then the next limb goes.'},
+  {t:'Silent feet', cats:['warmup','footwork'], dose:'3-4 easy problems',
+   d:'Place every foot so quietly that nobody could hear it. Make contact slowly with a relaxed ankle and the smallest imprint on the hold.'},
+  {t:'Glue feet', cats:['footwork','control'], dose:'3 problems',
+   d:'Once a foot lands on a hold it stays put until the next move makes you shift it. Forces you to place it right the first time.'},
+  {t:'Hover feet', cats:['warmup','footwork'], dose:'3 easy problems',
+   d:'Hold your toe just above each foothold for about three seconds, then place it. Builds the habit of landing precisely once instead of fixing it afterwards.'},
+  {t:'Hover hands', cats:['control','warmup'], dose:'2-3 easy problems',
+   d:'Hold each hand just above the next hold for about three seconds before taking it. Trains body tension and control between holds.'},
+  {t:'One touch', cats:['control','footwork'], dose:'3-4 problems below your limit',
+   d:'Each hand and foot touches each hold once. No readjusting a bad placement, and your eyes stay on the next hold until it is latched.'},
+  {t:'Eyes on feet', cats:['footwork','warmup'], dose:'3 easy problems',
+   d:'Look at every foothold before you step on it and keep looking for about two seconds after it lands. Fixes stepping without really seeing the hold.'},
+  {t:'Pause every move', cats:['control'], dose:'2-3 problems, up and down',
+   d:'Hold a clean, still position for three seconds after each move before reaching for the next hold. Exposes where you rely on momentum.'},
+  {t:'Straight-arm traverse', cats:['control','technique'], dose:'2-3 laps of an easy traverse',
+   d:'Traverse with your arms as straight as possible and move by rotating and shifting the hips. Hang off the skeleton, not the biceps.'},
+  {t:'One-hand traverse', cats:['control'], dose:'2 laps per hand, slab or vertical',
+   d:'Use one hand only, the other hangs at your side. Each time a hand leaves the wall, find a stable body position for a second or two.'},
+  {t:'One-leg climb', cats:['control','technique'], dose:'3 easy problems, alternate legs',
+   d:'Keep one foot off the wall for the whole problem. Teaches balance and how to manage momentum and weight over a single foot.'},
+  {t:'No-hands slab', cats:['footwork','technique'], dose:'3-5 min on easy slab',
+   d:'Climb easy slab without using your hands. Hips over feet, smearing and edging only.'},
+  {t:'Take-away', cats:['footwork','play'], dose:'1 easy problem, 5-6 rounds',
+   d:'Pick an easy problem with plenty of feet and remove one foothold each time you pass it. Keep going until it is hard but still possible.'},
+  {t:'Drop-knee laps', cats:['technique'], dose:'3 problems',
+   d:'On each problem use as many drop-knees as you can: toe on a hip-height foothold, knee rolled in and pointing down, hips turned to the wall.'},
+  {t:'Flagging laps', cats:['technique','warmup'], dose:'3 problems',
+   d:'On each problem use as many flags as you can, inside and outside, to counter the swing and keep your balance on small feet.'},
+  {t:'Hook laps', cats:['technique'], dose:'3 problems',
+   d:'Use as many heel hooks and toe hooks as the problem allows. Heel hooks pull the hips in and give reach; toe hooks train the core.'},
+  {t:'Backstep traverse', cats:['technique','footwork'], dose:'2-3 laps',
+   d:'Traverse using backsteps on the outside edge of the shoe so the hip turns into the wall. Straighten the arms and rest in the turned position.'},
+  {t:'Deadpoint practice', cats:['technique'], dose:'5-6 moves, just beyond static',
+   d:'Pick moves slightly too far to reach statically. Pull and let the hips drive, and take the hold at the very top of the motion where it weighs least.'},
+  {t:'Same problem three ways', cats:['technique','control'], dose:'1 problem, 3 versions',
+   d:'Climb the same easy problem three times, each time starting each move differently: hips first, feet first, then hands first.'},
+  {t:'Downclimb', cats:['control','footwork'], dose:'3 easy problems',
+   d:'Climb down what you climb up, ideally with the same quiet feet. Exposes weak footwork because you cannot see the holds as easily.'},
+  {t:'Add-on (play)', cats:['play','warmup'], dose:'10 min with a partner',
+   d:'Take turns: the first climber makes three moves, the next copies them and adds one, and so on until someone slips. Then start over.'},
+  {t:'Copy me (play)', cats:['play','warmup'], dose:'10 min with a partner',
+   d:'One person sets a line of holds as they move and the other follows exactly the same holds and body positions. Swap after each line.'},
+];
+const COACH_DECK_BY_NAME = (function(){ const o = {}; COACH_DECK.forEach(x => { o[x.t.toLowerCase()] = x; }); return o; })();
+
 // Original 24-item self-assessment (not Horst's wording — see chat).
 // Category cycles every 3 items: mental, technique, physical — matching the pattern requested.
 const QUESTIONS = [
@@ -665,6 +722,22 @@ function computeWeeklyRadarData(entries){
 
 // Your own guidelines, checked against the trailing 7 days. Framed as a gentle check-in, not a
 // pass/fail — the point is noticing drift, not adding pressure on top of an already full plate.
+// Which body regions a week of logged work has touched, from exercises tapped in the log and from the
+// named exercises in plans that were added to the log. Cardio doesn't count: this is about prehab and
+// strength coverage of each region, not conditioning.
+function computePrehabCoverage(entries){
+  const todayMs = new Date(todayISO()).getTime();
+  const covered = new Set();
+  entries.forEach(e => {
+    const ago = daysAgoFrom(todayMs, e.date);
+    if (ago < 0 || ago >= 7) return;
+    const names = arr(e.exercisesDone).slice();
+    if (e.plan) parsePlanSections(e.plan).forEach(sec => sec.items.forEach(it => names.push(it.name)));
+    names.forEach(n => { const m = exerciseMeta(n); if (m && m.k !== 'cardio') covered.add(m.r); });
+  });
+  const missing = PREHAB_REGIONS.filter(r => !covered.has(r));
+  return { covered: PREHAB_REGIONS.filter(r => covered.has(r)), missing };
+}
 function computeWeeklyGuidelines(entries){
   const todayMs = new Date(todayISO()).getTime();
   const days = dayList(entries).filter(d => { const ago = daysAgoFrom(todayMs, d.date); return ago>=0 && ago<7; });
@@ -685,6 +758,7 @@ function computeWeeklyGuidelines(entries){
     { label: 'Upper Tabata (1x/wk)', ok: tabataDone, detail: tabataDone ? 'done this week' : 'not yet this week' },
     { label: 'TRX (1x/wk)', ok: trxDone, detail: trxDone ? 'done this week' : 'not yet this week' },
     { label: 'Full efficient workout (2x/wk)', ok: fullWorkoutCount >= 2, detail: `${fullWorkoutCount} this week` },
+    (() => { const c = computePrehabCoverage(entries); return { label: 'Prehab across the whole body', ok: c.missing.length === 0, detail: c.missing.length ? 'not yet: ' + c.missing.join(', ') : 'every region touched' }; })(),
   ];
 }
 
@@ -1270,6 +1344,7 @@ async function askClaude(feedback){
     if (d.focusSecondary) focusLine += ` Secondary focus: ${d.focusSecondary}.`;
 
     const drillPool = d.drillCategory ? DRILL_LIBRARY.filter(x => x.cat === d.drillCategory) : DRILL_LIBRARY;
+    const deckText = COACH_DECK.map(x => `- ${x.t} [${x.cats.join('/')}] (${x.dose}): ${x.d}`).join('\n');
     const drillLine = d.sessionTypes.includes('Climbing')
       ? (d.sessionStyle === 'drill'
           ? `Wants a specific named drill for the climbing portion${d.drillCategory ? ' (category: '+d.drillCategory+')' : ''}. Pick ONE from the list below that fits today's context and state its exact title and source book so they can look it up in their own copy. Do not invent a drill name that isn't in this list, and do not attempt to describe or explain the drill's actual instructions — they'll look those up themselves:\n` + drillPool.map(x=>`- "${x.t}" (${x.book}, ${x.cat})`).join('\n')
@@ -1297,9 +1372,9 @@ async function askClaude(feedback){
       "modalities (strength/antagonist/cardio/core/fingers/mobility). Don't default to climbing content just because " +
       "you're a climbing coach.\n\n" +
       "STRUCTURE REQUIREMENT, only when 'Climbing' IS among the requested session types: always include, in this " +
-      "order — (1) warmup off the wall — general movement prep to get the body ready (joint circles, activation " +
-      "drills, light dynamic stretching — not on-wall climbing), (2) finger/wrist/forearm/shoulder health work, " +
-      "which is the LAST part of the warmup and always comes before any climbing, (3) light easy climbing as a " +
+      "order — (1) the off-wall warmup, built as the WARMUP STRUCTURE below (not on-wall climbing), (2) finger/" +
+      "wrist/forearm/shoulder health work, which is the LAST stage of the warmup and always comes before any " +
+      "climbing, (3) light easy climbing as a " +
       "second warmup phase, (4) the main climbing volume, (5) some near-limit/limit climbing, (6) " +
       "climbing-related strength or power exercise, (7) hip mobility/stability work and cooldown/stabilizer " +
       "work. That numbered list describes the STRUCTURE conceptually — it is not a template for output bullets. " +
@@ -1345,6 +1420,20 @@ async function askClaude(feedback){
       "Max Strength & Power'), since that context should visibly shape the prescription. The HIT System (max-strength " +
       "hangboard protocol) is a legitimate option to recommend here when it fits the phase and their level — feel free " +
       "to suggest it, not just repeaters.\n\n" +
+      "WARMUP STRUCTURE, whenever the plan includes a warmup (climbing or not): progress from small to big in " +
+      "this order, each stage as its own section header with its own tag — (a) 'Blood flow' [cardio]: 2-3 items, " +
+      "joint circles always included as the constant anchor plus one rotating item (jumping jacks, skipping, jog, " +
+      "mountain climbers); (b) 'Prehab' [antag]: 3-4 light exercises at 1x5 to 1x10 (write them like '1 x 8'), " +
+      "taken from the regions listed as not yet covered this week, emphasising antagonist work for shoulders, " +
+      "wrists/forearms and fingers, drawn from the Prehab bank by region; (c) 'Movement pattern' [mobility]: one " +
+      "coordinated compound movement (world's greatest stretch, squat with one arm overhead, or similar); " +
+      "(d) 'Finger activation' [fingers], always LAST, only when the session includes climbing or fingers: 1x5 to " +
+      "1x10 of light finger and forearm work (finger extensions, wrist curls) to get the muscles squeezing and " +
+      "firing. Keep this skeleton identical every session so it becomes routine and the body expects it; rotate " +
+      "only which exercises sit inside each stage. Include one play element somewhere in the warmup: a loose, " +
+      "low-stakes movement game or challenge, written as a normal named item ending in '(play)'. About half of " +
+      "the week's prehab belongs in the warmup and some of it in the cooldown, again from regions not yet " +
+      "covered this week.\n\n" +
       "SECTION HEADER FORMAT, applies to every plan: write each section header exactly like " +
       "'### Warmup — 10 min [mobility]'. The last item is a time-bucket tag in square brackets, one of: climb, " +
       "fingers, strength, antag, core, flexibility, mobility, cardio. It says which kind of training those minutes " +
@@ -1390,8 +1479,10 @@ async function askClaude(feedback){
       `Current pain status (most recent entry): ${mostRecentPain}${getActivePainRegions(App.entries).length ? ' — affected regions: ' + getActivePainRegions(App.entries).join(', ') : ''}\n` +
       `This week vs. usual rhythm: ${tmplLine}\n` +
       `Weekly guidelines not yet hit this week: ${guidelineLine}\n` +
+      `Body regions not yet touched by logged work in the last 7 days (use these for prehab): ${computePrehabCoverage(App.entries).missing.join(', ') || 'all covered'}\n` +
       `Weak-point profile (background context regardless of today's priority-focus choice): ${weakPointLine}\n` +
-      (drillLine ? `Climbing portion request: ${drillLine}\n` : '') + `\n` +
+      (drillLine ? `Climbing portion request: ${drillLine}\n` : '') +
+      (d.sessionTypes.includes('Climbing') ? `Coach deck — pick the easy-climbing warmup and any technique/limit-climbing drills from this list by exact name, and use the given dose and description rather than inventing a drill; at least one warmup-category drill should be in the easy climbing, and when the person asked for play, favour the play entries:\n${deckText}\n` : '') + `\n` +
       `Detected patterns: ${flags.length ? flags.join(' | ') : 'none flagged'}\n\n` +
       `Recent log, per calendar day with every field entered that day (most recent last):\n${recent}\n\n` +
       `Today:\n- Minutes available: ${d.minutes}\n- Feeling: ${FEELING_SCALE.find(f=>f.v===d.feeling).l} (${d.feeling}/5)\n` +
@@ -1739,7 +1830,22 @@ function categorizeSection(title, bucket){
 }
 // Climbing and mental cues have no bodyweight-exercise equivalent to swap in, and the finger/forearm
 // health block waits for its own light-work pool, so none of the three offers a swap.
-const NO_SWAP_CATEGORIES = ['climb','mental','fingers'];
+const NO_SWAP_CATEGORIES = ['mental','fingers'];
+// Only the climbing sections that are drill or technique prescriptions get a regenerate button;
+// a volume line ("8 problems two grades below your max") is not a drill to trade for another.
+const CLIMB_REGEN_RE = /warm|easy|technique|drill|skill|limit|precision|footwork|movement|play/i;
+function canRegenClimbSection(title){ return CLIMB_REGEN_RE.test(title || ''); }
+function pickDeckDrill(sectionTitle, currentName, index){
+  const warm = /warm|easy/i.test(sectionTitle || '');
+  let pool = COACH_DECK.filter(x => x.t !== currentName && (warm ? x.cats.includes('warmup') : !x.cats.includes('play') || /play/i.test(sectionTitle || '')));
+  const history = App.ui.swapHistory[index] || [];
+  let fresh = pool.filter(x => !history.includes(x.t));
+  if (!fresh.length) { App.ui.swapHistory[index] = []; fresh = pool; }
+  if (!fresh.length) return null;
+  const choice = fresh[Math.floor(Math.random() * fresh.length)];
+  App.ui.swapHistory[index] = (App.ui.swapHistory[index] || []).concat([choice.t]);
+  return choice;
+}
 // A locally-swapped exercise needs its own sensible default detail — reusing the exercise it's
 // replacing would leave a stale, potentially nonsensical prescription attached (e.g. a rep-based
 // movement keeping a hold-style "30 sec/side" left over from whatever it replaced). The swap pool
@@ -1795,7 +1901,7 @@ function pickSwapAlternative(category, currentName, index){
   App.ui.swapHistory[index] = (App.ui.swapHistory[index] || []).concat([choice]);
   return choice;
 }
-function swapPlanLine(index, category){
+function swapPlanLine(index, category, sectionTitle){
   const lines = (App.ui.planText || '').split('\n');
   const line = lines[index];
   if (!line) return;
@@ -1804,6 +1910,14 @@ function swapPlanLine(index, category){
   const body = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
   const sepMatch = splitExerciseNameDetail(body);
   const currentName = (sepMatch ? sepMatch[1] : body).trim();
+  if (category === 'climb') {
+    const drill = pickDeckDrill(sectionTitle, currentName, index);
+    if (!drill) { App.toast('No other drills in the deck for this section'); return; }
+    lines[index] = bulletMatch[1] + drill.t + ', ' + drill.dose + '. ' + drill.d;
+    App.ui.planText = lines.join('\n');
+    App.render();
+    return;
+  }
   const alt = pickSwapAlternative(category, currentName, index);
   if (!alt) { App.toast('No alternatives available for this one'); return; }
   lines[index] = bulletMatch[1] + alt + ', ' + defaultDetailFor(alt);
@@ -1872,6 +1986,7 @@ function renderPlanEditable(text, interactive){
   const lines = text.split('\n');
   const allCls = classifyPlanLines(lines);
   let category = 'default';
+  let sectionTitle = '';
   return lines.map((line, i) => {
     const cls = allCls[i];
     if (cls === 'header') {
@@ -1879,6 +1994,7 @@ function renderPlanEditable(text, interactive){
       const tagged = splitHeaderTag(clean);
       const { title, badge } = parseHeaderParts(tagged.text);
       category = categorizeSection(title, tagged.bucket);
+      sectionTitle = title;
       return `<div class="plan-section-header" style="border-left-color:var(--cat-${category})">
         <span class="plan-section-title">${escHtml(title)}</span>
         ${badge ? `<span class="plan-badge">${escHtml(badge)}</span>` : ''}
@@ -1914,7 +2030,7 @@ function renderPlanEditable(text, interactive){
         </div>
       </div>
       <div class="plan-line-controls">
-        ${!NO_SWAP_CATEGORIES.includes(category) ? `<button type="button" onclick="swapPlanLine(${i},'${category}')" title="Swap for a different exercise">&#8635;</button>` : ''}
+        ${(category === 'climb' ? canRegenClimbSection(sectionTitle) : !NO_SWAP_CATEGORIES.includes(category)) ? `<button type="button" onclick="swapPlanLine(${i},'${category}','${escAttr(sectionTitle)}')" title="${category === 'climb' ? 'Regenerate from the coach deck' : 'Swap for a different exercise'}">&#8635;</button>` : ''}
         <button type="button" onclick="movePlanLine(${i},-1)" title="Move up">&uarr;</button>
         <button type="button" onclick="movePlanLine(${i},1)" title="Move down">&darr;</button>
         <button type="button" class="ex-remove" onclick="removePlanLine(${i})" title="Remove">&times;</button>
@@ -3087,6 +3203,7 @@ window.toggleStopwatch = toggleStopwatch; window.resetStopwatch = resetStopwatch
 window.removePlanLine = removePlanLine; window.movePlanLine = movePlanLine; window.swapPlanLine = swapPlanLine;
 window.toggleLogMore = toggleLogMore; window.autoGrow = autoGrow;
 window.cancelGeneration = cancelGeneration;
+window.COACH_DECK = COACH_DECK; window.COACH_DECK_BY_NAME = COACH_DECK_BY_NAME; window.EXERCISE_META = EXERCISE_META;
 window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
 window.EXERCISE_LIBRARY = EXERCISE_LIBRARY; window.WORKOUT_STYLES = WORKOUT_STYLES;
 window.FOCUS_AREAS = FOCUS_AREAS; window.ADHERENCE_OPTIONS = ADHERENCE_OPTIONS;
