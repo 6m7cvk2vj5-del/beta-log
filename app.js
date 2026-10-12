@@ -338,6 +338,163 @@ const COACH_DECK = [
 ];
 const COACH_DECK_BY_NAME = (function(){ const o = {}; COACH_DECK.forEach(x => { o[x.t.toLowerCase()] = x; }); return o; })();
 
+// ---- Illustrations: simple filled, gender-neutral stick figures drawn as SVG, shown step by step.
+// A pose gives the hip position, the torso angle (degrees, 0 = right, 90 = up) and where each hand
+// and foot is; knees and elbows are solved from limb lengths, so poses are easy to write and always
+// anatomically plausible. Far-side limbs are drawn lighter for depth. Frames are 120 x 120.
+const FIG = { torso:28, headGap:11, headR:7.5, ua:15, fa:14, th:20, sh:19, width:7 };
+function figIK(root, target, l1, l2, bend){
+  const dx = target[0] - root[0], dy = target[1] - root[1];
+  const d = Math.hypot(dx, dy) || 0.001;
+  const dd = Math.min(l1 + l2 - 0.01, Math.max(Math.abs(l1 - l2) + 0.01, d));
+  const ux = dx / d, uy = dy / d;
+  const a = (l1 * l1 - l2 * l2 + dd * dd) / (2 * dd);
+  const h = Math.sqrt(Math.max(0, l1 * l1 - a * a));
+  return [[root[0] + ux * a - uy * bend * h, root[1] + uy * a + ux * bend * h], [root[0] + ux * dd, root[1] + uy * dd]];
+}
+function figPoint(from, deg, len){ const r = deg * Math.PI / 180; return [from[0] + Math.cos(r) * len, from[1] - Math.sin(r) * len]; }
+function renderFigure(p){
+  const f = FIG, hip = p.hip, neck = figPoint(hip, p.torso, f.torso);
+  const headAt = figPoint(neck, p.head === undefined ? p.torso : p.head, f.headGap);
+  const kb = p.kb || [-1, -1], eb = p.eb || [1, 1];
+  const limb = (root, tgt, l1, l2, bend, far) => {
+    const [mid, end] = figIK(root, tgt, l1, l2, bend);
+    return `<polyline points="${root[0].toFixed(1)},${root[1].toFixed(1)} ${mid[0].toFixed(1)},${mid[1].toFixed(1)} ${end[0].toFixed(1)},${end[1].toFixed(1)}" fill="none" stroke="var(--text)" stroke-width="${f.width}" stroke-linecap="round" stroke-linejoin="round"${far ? ' opacity="0.42"' : ''}/>`;
+  };
+  const shoulder = figPoint(neck, (p.torso + 180) % 360, 3);
+  const parts = [
+    limb(shoulder, p.hands[1], f.ua, f.fa, eb[1], true), limb(hip, p.feet[1], f.th, f.sh, kb[1], true),
+    `<line x1="${hip[0]}" y1="${hip[1]}" x2="${neck[0].toFixed(1)}" y2="${neck[1].toFixed(1)}" stroke="var(--text)" stroke-width="${f.width + 3}" stroke-linecap="round"/>`,
+    limb(hip, p.feet[0], f.th, f.sh, kb[0], false), limb(shoulder, p.hands[0], f.ua, f.fa, eb[0], false),
+    `<circle cx="${headAt[0].toFixed(1)}" cy="${headAt[1].toFixed(1)}" r="${f.headR}" fill="var(--text)"/>`,
+  ];
+  return parts.join('');
+}
+function renderIllusProps(props){
+  return (props || []).map(q => {
+    if (q.k === 'floor') return `<line x1="4" y1="${q.y || 106}" x2="116" y2="${q.y || 106}" stroke="var(--muted)" stroke-width="2" stroke-linecap="round"/>`;
+    if (q.k === 'wall') return `<line x1="${q.x}" y1="6" x2="${q.x}" y2="114" stroke="var(--muted)" stroke-width="3" stroke-linecap="round"/>`;
+    if (q.k === 'bar') return `<line x1="${q.x1}" y1="${q.y}" x2="${q.x2}" y2="${q.y}" stroke="var(--muted)" stroke-width="4" stroke-linecap="round"/>`;
+    if (q.k === 'hold') return `<circle cx="${q.x}" cy="${q.y}" r="4" fill="var(--gold)"/>`;
+    if (q.k === 'arrow') {
+      const ang = Math.atan2(q.y2 - q.y1, q.x2 - q.x1), hx = 5;
+      const p1 = [q.x2 - hx * Math.cos(ang - 0.5), q.y2 - hx * Math.sin(ang - 0.5)], p2 = [q.x2 - hx * Math.cos(ang + 0.5), q.y2 - hx * Math.sin(ang + 0.5)];
+      return `<g stroke="var(--gold)" stroke-width="2.4" stroke-linecap="round" fill="none"><line x1="${q.x1}" y1="${q.y1}" x2="${q.x2}" y2="${q.y2}"/><polyline points="${p1[0].toFixed(1)},${p1[1].toFixed(1)} ${q.x2},${q.y2} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}"/></g>`;
+    }
+    return '';
+  }).join('');
+}
+function renderIllusFrame(step){
+  const body = renderFigure(step.pose);
+  const inner = renderIllusProps(step.props) + body;
+  const v = step.view || [0, 0, 120, 120];
+  return `<svg viewBox="${v.join(' ')}" role="img" aria-label="${escHtml(step.cap)}">${step.flip ? `<g transform="translate(120,0) scale(-1,1)">${inner}</g>` : inner}</svg>`;
+}
+const FLOOR = {k:'floor'};
+// Wall poses: figure faces right toward a vertical wall at x=108; knees point at the wall, elbows bend down.
+const WALL = [{k:'wall',x:108}];
+const ILLUSTRATIONS = [
+  { names:["world's greatest stretch","world's greatest stretch (full combo)","worlds greatest stretch"], title:"World's greatest stretch", view:[0,30,120,86], steps:[
+    { cap:'Long lunge, both hands down inside the front foot',
+      pose:{hip:[58,86], torso:18, head:30, hands:[[80,104],[88,104]], feet:[[90,104],[18,104]], kb:[-1,1]}, props:[FLOOR] },
+    { cap:'Rotate open and reach one arm to the sky',
+      pose:{hip:[58,86], torso:40, head:75, hands:[[96,50],[80,104]], feet:[[90,104],[18,104]], kb:[-1,1]},
+      props:[FLOOR, {k:'arrow',x1:104,y1:66,x2:104,y2:44}] },
+  ]},
+  { names:['side plank hold','side plank with leg raise','side elbow planks'], title:'Side plank', view:[0,40,120,74], steps:[
+    { cap:'Elbow under shoulder, hips lifted in a straight line',
+      pose:{hip:[54,88], torso:21, head:21, hands:[[96,104],[84,52]], feet:[[18,102],[18,102]]},
+      props:[FLOOR, {k:'arrow',x1:54,y1:70,x2:54,y2:58}] },
+  ]},
+  { names:['plank','forearm plank','plank (elevated)','full-body focus plank','plank (sideways walk)'], title:'Plank', view:[0,50,120,62], steps:[
+    { cap:'Forearms down, body one straight line from head to heels',
+      pose:{hip:[58,93], torso:12, head:12, hands:[[100,104],[104,104]], feet:[[20,102],[24,102]]}, props:[FLOOR] },
+  ]},
+  { names:['dead bug'], title:'Dead bug', view:[0,56,120,56], steps:[
+    { cap:'On your back, arms up, knees over hips',
+      pose:{hip:[62,100], torso:180, head:180, hands:[[34,68],[34,68]], feet:[[80,80],[80,80]]}, props:[FLOOR] },
+    { cap:'Lower the opposite arm and leg together, back flat',
+      pose:{hip:[62,100], torso:180, head:180, hands:[[34,68],[8,98]], feet:[[80,80],[100,100]]},
+      props:[FLOOR, {k:'arrow',x1:86,y1:84,x2:98,y2:94}] },
+  ]},
+  { names:['bird dog'], title:'Bird dog', view:[0,52,120,62], steps:[
+    { cap:'On hands and knees, back flat',
+      pose:{hip:[50,84], torso:16, head:16, hands:[[78,104],[78,104]], feet:[[28,104],[28,104]]}, props:[FLOOR] },
+    { cap:'Reach one arm forward and the opposite leg back',
+      pose:{hip:[50,84], torso:16, head:16, hands:[[78,104],[112,78]], feet:[[16,82],[28,104]]},
+      props:[FLOOR] },
+  ]},
+  { names:['glute bridges','glute bridge','bridges','bridge pose'], title:'Glute bridge', view:[0,62,120,50], steps:[
+    { cap:'On your back, knees bent, feet flat',
+      pose:{hip:[56,100], torso:180, head:180, hands:[[58,103],[62,103]], feet:[[82,104],[86,104]]}, props:[FLOOR] },
+    { cap:'Drive the hips up until shoulders, hips and knees line up',
+      pose:{hip:[58,80], torso:205, head:200, hands:[[58,103],[62,103]], feet:[[84,104],[88,104]]},
+      props:[FLOOR, {k:'arrow',x1:58,y1:96,x2:58,y2:86}] },
+  ]},
+  { names:['hanging leg raises','hanging leg lift','hanging knee lifts','dip-bar leg raises'], title:'Hanging leg raise', steps:[
+    { cap:'Hang from the bar, shoulders set, legs straight down',
+      pose:{hip:[60,80], torso:90, head:104, hands:[[55,18],[65,18]], feet:[[58,118],[62,118]]},
+      props:[{k:'bar',x1:30,x2:90,y:18}] },
+    { cap:'Lift the legs to hip height without swinging',
+      pose:{hip:[60,80], torso:90, head:104, hands:[[55,18],[65,18]], feet:[[98,78],[102,80]]},
+      props:[{k:'bar',x1:30,x2:90,y:18}, {k:'arrow',x1:70,y1:104,x2:92,y2:90}] },
+  ]},
+  { names:['squat with one arm overhead','squat-to-stand'], title:'Squat with one arm overhead', view:[0,18,120,96], steps:[
+    { cap:'Sit down into a deep squat, hands together in front',
+      pose:{hip:[26,84], torso:62, head:72, hands:[[58,62],[58,62]], feet:[[40,104],[46,104]]}, props:[FLOOR] },
+    { cap:'Stay low, open the chest and reach one arm overhead',
+      pose:{hip:[26,84], torso:68, head:84, hands:[[46,32],[50,84]], feet:[[40,104],[46,104]]},
+      props:[FLOOR, {k:'arrow',x1:70,y1:62,x2:70,y2:40}] },
+  ]},
+  { names:['robot drill'], title:'Robot drill', view:[30,6,90,106], steps:[
+    { cap:'Start balanced, all four limbs on holds',
+      pose:{hip:[84,70], torso:80, head:86, hands:[[102,44],[102,44]], feet:[[100,96],[96,100]]},
+      props:[...WALL, {k:'hold',x:102,y:44}, {k:'hold',x:102,y:24}, {k:'hold',x:100,y:96}, {k:'hold',x:100,y:80}] },
+    { cap:'Move one hand only. Everything else stays still',
+      pose:{hip:[84,70], torso:80, head:86, hands:[[102,24],[102,44]], feet:[[100,96],[96,100]]},
+      props:[...WALL, {k:'hold',x:102,y:44}, {k:'hold',x:102,y:24}, {k:'hold',x:100,y:96}, {k:'hold',x:100,y:80}, {k:'arrow',x1:70,y1:40,x2:70,y2:24}] },
+    { cap:'Settled? Now one foot only, to the next hold',
+      pose:{hip:[84,70], torso:80, head:86, hands:[[102,24],[102,44]], feet:[[100,80],[96,100]]},
+      props:[...WALL, {k:'hold',x:102,y:44}, {k:'hold',x:102,y:24}, {k:'hold',x:100,y:96}, {k:'hold',x:100,y:80}, {k:'arrow',x1:70,y1:96,x2:70,y2:82}] },
+  ]},
+  { names:['flagging laps','flagging','flagging (inside-edge flag-across / outside-edge flag-out)'], title:'Flagging', view:[24,6,96,106], steps:[
+    { cap:'Both feet on holds, weight balanced',
+      pose:{hip:[84,70], torso:80, head:86, hands:[[102,40],[102,44]], feet:[[100,96],[96,100]]},
+      props:[...WALL, {k:'hold',x:102,y:42}, {k:'hold',x:100,y:96}, {k:'hold',x:96,y:100}] },
+    { cap:'Lift one foot and swing the leg out to counterbalance',
+      pose:{hip:[84,70], torso:80, head:86, hands:[[102,40],[102,44]], feet:[[100,96],[52,98]]},
+      props:[...WALL, {k:'hold',x:102,y:42}, {k:'hold',x:100,y:96}, {k:'arrow',x1:78,y1:104,x2:56,y2:102}] },
+  ]},
+  { names:['silent feet','hover feet','glue feet','eyes on feet'], title:'Silent feet', view:[30,6,90,106], steps:[
+    { cap:'Hover the toe above the hold for a moment',
+      pose:{hip:[84,70], torso:80, head:86, hands:[[102,40],[102,44]], feet:[[100,96],[100,72]]},
+      props:[...WALL, {k:'hold',x:102,y:42}, {k:'hold',x:100,y:96}, {k:'hold',x:100,y:82}] },
+    { cap:'Place it slowly and quietly, with a relaxed ankle',
+      pose:{hip:[84,70], torso:80, head:86, hands:[[102,40],[102,44]], feet:[[100,96],[100,82]]},
+      props:[...WALL, {k:'hold',x:102,y:42}, {k:'hold',x:100,y:96}, {k:'hold',x:100,y:82}, {k:'arrow',x1:72,y1:70,x2:72,y2:82}] },
+  ]},
+];
+function findIllustration(name){
+  if (!name) return null;
+  const n = String(name).trim().toLowerCase();
+  const strip = n.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+  return ILLUSTRATIONS.find(il => il.names.includes(n) || il.names.includes(strip)) || null;
+}
+function illustrationHTML(il){
+  return `<div class="illus"><div class="illus-title">${escHtml(il.title)}</div>
+    <div class="illus-strip">${il.steps.map((st, i) => `<figure class="illus-step">${renderIllusFrame(Object.assign({ view: il.view }, st))}
+      <figcaption><b>${i + 1}</b> ${escHtml(st.cap)}</figcaption></figure>`).join('')}</div></div>`;
+}
+function showIllustration(name){
+  const il = findIllustration(name);
+  if (!il) return;
+  App.ui.infoPopup = { html: illustrationHTML(il), text: il.title };
+  App.render();
+}
+function howButton(name){
+  return findIllustration(name) ? `<button type="button" class="how-btn" onclick="showIllustration('${escAttr(name)}')">Show steps</button>` : '';
+}
+
 // Original 24-item self-assessment (not Horst's wording — see chat).
 // Category cycles every 3 items: mental, technique, physical — matching the pattern requested.
 const QUESTIONS = [
@@ -2027,6 +2184,7 @@ function renderPlanEditable(text, interactive){
         <div class="exercise-card-main">
           <div class="exercise-card-name">${namePart ? `<span class="ex-link" onclick="searchExercise('${escAttr(namePart)}')">${nameHtml}</span>` : nameHtml}</div>
           ${restPart.trim() ? `<div class="exercise-card-detail">${escHtml(restPart.trim())}</div>` : ''}
+          ${namePart ? howButton(namePart) : ''}
         </div>
       </div>
       <div class="plan-line-controls">
@@ -2052,6 +2210,7 @@ function renderSectionCarousel(text){
       ${sec.items.map(it => `<div class="section-card-item">
         <div class="exercise-card-name"><span class="ex-link" onclick="searchExercise('${escAttr(it.name)}')">${escHtml(it.name)}</span></div>
         ${it.detail ? `<div class="exercise-card-detail">${escHtml(it.detail)}</div>` : ''}
+        ${howButton(it.name)}
       </div>`).join('')}
     </div>`;
   }).join('');
@@ -2079,7 +2238,7 @@ App.render = function(){
         const rich = typeof popup === 'object' && popup !== null;
         const text = rich ? popup.text : popup;
         return `<div class="info-overlay" onclick="if(event.target===this) closeInfo()">
-          <div class="info-popup"><button class="close-x" onclick="closeInfo()">&times;</button><p>${escHtml(text)}</p>
+          <div class="info-popup"><button class="close-x" onclick="closeInfo()">&times;</button>${rich && popup.html ? popup.html : `<p>${escHtml(text)}</p>`}
           ${rich && popup.actionLabel ? `<button class="btn btn-primary" style="margin-top:12px;" onclick="closeInfo(); ${popup.actionFn}">${escHtml(popup.actionLabel)}</button>` : ''}
           </div>
         </div>`;
@@ -2859,6 +3018,14 @@ function renderSettings(){
     <button class="btn btn-ghost" onclick="resetWeeklyGoals()">Reset goals to defaults</button>
   </div>
   <div class="card">
+    <h2>Coach deck${infoIcon("Technique, warmup and play drills the plans can pick from. Climbing sections with drills have a regenerate button that swaps in another one. To add your coach's own, add them to COACH_DECK in app.js.")}</h2>
+    ${COACH_DECK.map(x => `<div style="padding:8px 0;border-top:1px solid var(--border);">
+      <div style="font-weight:600;font-size:0.85rem;">${escHtml(x.t)} <span class="small muted" style="font-weight:400;">${escHtml(x.dose)}</span></div>
+      <div class="small muted" style="margin-top:2px;">${escHtml(x.d)}</div>
+      ${howButton(x.t)}
+    </div>`).join('')}
+  </div>
+  <div class="card">
     <h2>Display</h2>
     <div class="field"><label>Theme</label>
       ${pillsHTML(['Light','Dark'], s.theme.charAt(0).toUpperCase()+s.theme.slice(1), 'setTheme', {sm:true})}
@@ -3203,7 +3370,7 @@ window.toggleStopwatch = toggleStopwatch; window.resetStopwatch = resetStopwatch
 window.removePlanLine = removePlanLine; window.movePlanLine = movePlanLine; window.swapPlanLine = swapPlanLine;
 window.toggleLogMore = toggleLogMore; window.autoGrow = autoGrow;
 window.cancelGeneration = cancelGeneration;
-window.COACH_DECK = COACH_DECK; window.COACH_DECK_BY_NAME = COACH_DECK_BY_NAME; window.EXERCISE_META = EXERCISE_META;
+window.showIllustration = showIllustration; window.ILLUSTRATIONS = ILLUSTRATIONS; window.COACH_DECK = COACH_DECK; window.COACH_DECK_BY_NAME = COACH_DECK_BY_NAME; window.EXERCISE_META = EXERCISE_META;
 window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
 window.EXERCISE_LIBRARY = EXERCISE_LIBRARY; window.WORKOUT_STYLES = WORKOUT_STYLES;
 window.FOCUS_AREAS = FOCUS_AREAS; window.ADHERENCE_OPTIONS = ADHERENCE_OPTIONS;
