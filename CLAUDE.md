@@ -22,6 +22,16 @@ Work happens from two places: Mac sessions (this iCloud folder) and phone/cloud 
 - End of every Mac session (work verified per Testing below): commit, then offer to push. Pushing `main` deploys the live site, so ask first.
 - Phone/cloud sessions: work on a branch (never `main`), push the branch, open a pull request. The user merges it after checking; the merge is what deploys. After a merge, the next Mac session picks it up via the start-of-session pull.
 
+## Reviewing a change before it reaches main
+
+Whenever asking the user to review a change before it goes to `main`, include a temporary link they can tap to look at it — don't just describe the change or offer a push.
+
+- Publish the working tree as a private Artifact: `index.html` as the page, with `app.js` and `icon.png` passed through `files`. Re-publish to the same `url` on each revision so the link stays the same during a review.
+- Put the link directly in the review request, with what changed in a sentence or two and the commit it reflects.
+- Read `index.html` and `app.js` in full before publishing (they are the whole app). Never include an API key.
+- The preview runs on a different origin from the live site, so it starts with empty localStorage: no logged entries and no API key. Say so, and say what can't be checked there (e.g. plan generation if the sandbox blocks calls to api.anthropic.com).
+- The link is for review only. Pushing `main` is still a separate, explicit ask.
+
 ## Git on this machine (Mac only)
 
 Apple's Command Line Tools are unavailable for this macOS version, so `/usr/bin/git` is a non-working stub. Use the portable git at `~/.local/bin/git` (wraps dugite's git in `~/.local/git-portable`). Put it on PATH first:
@@ -44,3 +54,4 @@ Conventions — each came from a real bug:
 - Always pass `pretendToBeVisual: true` to jsdom (loadApp already does).
 - Keep test scripts small and single-purpose, run as separate `node -e` invocations with an explicit timeout. Combined scripts have hung in sandboxed environments. On macOS there is no `timeout`; use `perl -e 'alarm 60; exec @ARGV' node ...`.
 - Before telling the user a change is done: run jsdom checks, then take real Playwright screenshots (mobile viewport, e.g. 390x844, saved to `screenshots/`, which is gitignored) and look at them.
+- `node_modules` in this folder can contain iCloud-evicted ("dataless") files, which makes `require('jsdom')` block indefinitely. If a test hangs on load, install the dev dependencies outside iCloud (copy `package.json` and `package-lock.json` to a scratch dir, `npm ci`, point the loader at that jsdom) instead of touching `node_modules` here.

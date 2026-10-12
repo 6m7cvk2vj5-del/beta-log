@@ -36,6 +36,18 @@ const WEEKLY_TARGETS = { climb:150, fingers:40, strength:40, antag:50, core:40, 
 // Taper targets are deliberately a fraction of normal — hitting the usual weekly volume during a
 // taper week isn't the goal, so scoring against the same bar would just look like a bad week.
 const TAPER_WEEKLY_TARGETS = { climb:50, fingers:20, strength:10, antag:10, core:10, flexibility:15, mobility:15, cardio:10 };
+// Goals actually used for the radar: the defaults above, overridden by whatever is set in Settings.
+// Taper weeks keep the same proportions as the defaults (e.g. climbing 50 of 150), applied to your
+// own numbers, so a personal goal never needs a second "taper goal" typed in.
+function getWeeklyTargets(isTaper){
+  const mine = App.settings.weeklyTargets || {};
+  const out = {};
+  Object.keys(WEEKLY_TARGETS).forEach(k => {
+    const base = Number.isFinite(Number(mine[k])) && mine[k] !== '' && mine[k] !== undefined ? Math.max(0, Number(mine[k])) : WEEKLY_TARGETS[k];
+    out[k] = isTaper ? Math.round(base * TAPER_WEEKLY_TARGETS[k] / WEEKLY_TARGETS[k]) : base;
+  });
+  return out;
+}
 const RADAR_AXES = [
   {key:'climb', label:'Climbing'}, {key:'fingers', label:'Fingers'}, {key:'strength', label:'Strength'},
   {key:'antag', label:'Antagonist'}, {key:'core', label:'Core'}, {key:'flexibility', label:'Flexibility'},
@@ -247,6 +259,13 @@ function phaseGuidanceText(phaseName){
   const parts = g.breakdown.map(b => (b.time ? b.time + ' ' : '') + b.label).join(', ');
   return g.summary + (parts ? ' Roughly: ' + parts + '.' : '');
 }
+// First sentence of a phase's summary: "the focus right now" in one line for Home.
+function phaseFocusLine(phaseName){
+  const g = PHASE_GUIDANCE[phaseName];
+  if (!g) return '';
+  const first = g.summary.split(/(?<=\.)\s/)[0];
+  return first;
+}
 // Scannable version for Home — a short summary line plus a compact list, instead of one dense
 // paragraph with every duration and label run together.
 function renderPhaseGuidance(phaseName){
@@ -266,7 +285,7 @@ const LS = {
 };
 
 const App = {
-  settings: { apiKey:'', cycleType:'3-2-1', cycleStartDate: todayISO(), gradeIndoor:'', gradeOutdoor:'', fontSize:'medium', theme:'light' },
+  settings: { apiKey:'', cycleType:'3-2-1', cycleStartDate: todayISO(), gradeIndoor:'', gradeOutdoor:'', fontSize:'medium', theme:'light', weeklyTargets:{} },
   entries: [],
   _entriesVersion: 0, // bumped by saveEntries(); invalidates the day-aggregation caches
   assessments: [],
@@ -522,7 +541,7 @@ function compareToWeeklyTemplate(entries){
 // ---- Radar data ----
 function computeWeeklyRadarData(entries){
   const isTaper = getCycleState(App.settings).phaseName === 'Taper';
-  const targets = isTaper ? TAPER_WEEKLY_TARGETS : WEEKLY_TARGETS;
+  const targets = getWeeklyTargets(isTaper);
   const todayMs = new Date(todayISO()).getTime();
   const days = dayList(entries).filter(d => {
     const daysAgo = daysAgoFrom(todayMs, d.date);
@@ -532,7 +551,7 @@ function computeWeeklyRadarData(entries){
   days.forEach(d => { Object.keys(sums).forEach(k => { sums[k] += d['time'+k[0].toUpperCase()+k.slice(1)] || 0; }); });
   return RADAR_AXES.map(a => {
     const value = sums[a.key], target = targets[a.key];
-    const pct = Math.min(150, Math.round((value / target) * 100));
+    const pct = target > 0 ? Math.min(150, Math.round((value / target) * 100)) : (value > 0 ? 100 : 0);
     return {
       axis: a.label, pct, value, target,
       detail: `${a.label}: ${value} of ${target} min this week (${pct}%).`,
@@ -674,12 +693,6 @@ function detectPatterns(entries){
   }
   if (consecutive.length >= 6 && !consecutive.some(d => classifyDay(d)==='Rest')) {
     flags.push("6+ days logged in a row with no rest day in between. Rest is where the adaptation actually happens.");
-  }
-
-  // weekly template comparison — only mention if the week is meaningfully off, not every minor blip
-  const tmpl = compareToWeeklyTemplate(entries);
-  if (tmpl.daysSoFar >= 3 && tmpl.notes.length >= 2) {
-    flags.push("This week's shape is drifting from your usual rhythm: " + tmpl.notes.slice(0,2).join(' '));
   }
 
   return flags;
@@ -1895,9 +1908,19 @@ function renderWeakPointRadarCardStandalone(){
     ${wp.previousDate ? `<p class="small muted" style="text-align:center;margin-top:6px;">Gold: ${escHtml(wp.latestDate)} &middot; Dashed: ${escHtml(wp.previousDate)}</p>` : ''}
   </div>`;
 }
-function renderRadarCarousel(radarData, focusRadarData){
+// Plain list under the weekly radar: what was done against what you're aiming for, in minutes —
+// the chart only shows proportions, this is the actual numbers.
+function renderGoalList(radarData){
+  return `<div class="goal-list">${radarData.map(d => {
+    const met = d.target > 0 && d.value >= d.target;
+    return `<div class="goal-row${met ? ' met' : ''}"><span>${escHtml(d.axis)}</span><span><b>${d.value}</b>${d.target > 0 ? ` / ${d.target}` : ''} min</span></div>`;
+  }).join('')}</div>
+  <p class="small muted" style="margin-top:8px;">Goals are adjustable in Settings. Taper weeks scale them down.</p>`;
+}
+function renderRadarCarousel(radarData, focusRadarData, minutesHtml){
   const slides = [
-    { title: 'Weekly balance', tooltip: 'Trailing 7 days vs. rough weekly targets. Dashed ring = target; gold = you. Tap an axis for the numbers.', chartId: 'weeklyBalance', data: radarData },
+    { title: 'Last 7 days vs. your goals', tooltip: 'Minutes in each area over the trailing 7 days. Dashed ring = your weekly goal; gold = what you did. Tap an axis for the numbers.', chartId: 'weeklyBalance', data: radarData, below: renderGoalList(radarData) },
+    { title: 'Minutes, last 14 days', tooltip: 'Each logged day, stacked by what you actually did.', html: minutesHtml },
     { title: 'Focus area attention', tooltip: 'Last 10 days of logged sessions — the same window used when referencing your recent history for a plan request. Tap an axis for the numbers.', chartId: 'focusAttention', data: focusRadarData },
   ];
   const wp = computeWeakPointRadarData();
@@ -1919,9 +1942,13 @@ function renderRadarCarousel(radarData, focusRadarData){
   App.ui.radarSlide = idx; // clamp defensively if the slide count ever shrinks between renders
   const slide = slides[idx];
   const dots = slides.map((s,i) => `<button type="button" onclick="setRadarSlide(${i})" class="radar-dot${i===idx?' active':''}" aria-label="${escAttr(s.title)}"></button>`).join('');
+  const body = slide.html !== undefined
+    ? slide.html
+    : `<div style="display:flex;justify-content:center;">${renderRadarSVG(slide.data, undefined, slide.chartId, slide.compareData)}</div>`;
   return `<div class="card" id="radarCarousel">
     <h2>${escHtml(slide.title)}${infoIcon(slide.tooltip)}</h2>
-    <div style="display:flex;justify-content:center;">${renderRadarSVG(slide.data, undefined, slide.chartId, slide.compareData)}</div>
+    ${body}
+    ${slide.below || ''}
     ${slide.caption ? `<p class="small muted" style="text-align:center;margin-top:6px;">${slide.caption}</p>` : ''}
     ${slides.length > 1 ? `<div class="radar-dots">${dots}</div>` : ''}
   </div>`;
@@ -1976,8 +2003,6 @@ function renderHome(){
   }
 
   const days = dayList(entries); // one record per calendar day, entries already combined
-  const climbDayCount = days.filter(d => classifyDay(d)==='Climb').length;
-  const sinceAssessment = climbingSessionsSinceLastAssessment();
 
   // minutes, last 14 calendar days — stacked by category so you can see what was actually hit,
   // not just how much time in total. Kept separate from the rhythm view below.
@@ -2011,47 +2036,38 @@ function renderHome(){
     };
   });
 
-  // weekly balance radar + template comparison
+  // weekly balance radar: trailing 7 days against the goals set in Settings
   const radarData = computeWeeklyRadarData(entries);
   App.ui.radarData.weeklyBalance = radarData;
   App.ui.radarData.focusAttention = focusRadarData;
-  const tmpl = compareToWeeklyTemplate(entries);
-  const tmplRow = tmpl.rows.map(r => {
-    const mismatch = !r.isFuture && r.actual !== r.template && r.actual !== 'No entry';
-    return `<div class="bar-row" style="align-items:center;opacity:${r.isFuture?0.45:1};">
-      <div class="bar-label" style="width:36px;flex:none;">${r.day}</div>
-      <div style="flex:1;font-size:13px;${mismatch?'color:var(--red);':''}">${r.isFuture ? '—' : escHtml(r.actual)} <span class="small muted">(usually ${r.template})</span></div>
-    </div>`;
-  }).join('');
+  const minutesHtml = `<div class="chart-legend" style="margin-top:2px;">${legend}</div><div class="barlist">${minBars}</div>`;
+
+  // Where you are, in a few plain lines: the phase's focus, then how the last 7 days actually went
+  // against your own goals (counted straight from the radar data, nothing estimated).
+  const last7Days = days.filter(d => { const ago = daysAgoFrom(new Date(todayISO()).getTime(), d.date); return ago >= 0 && ago < 7; });
+  const activeDays7 = last7Days.filter(d => classifyDay(d) !== 'Rest').length;
+  const minutes7 = last7Days.reduce((sum, d) => sum + d.totalMinutes, 0);
+  const atGoal = radarData.filter(d => d.target > 0 && d.value >= d.target).length;
+  const furthest = radarData.filter(d => d.target > 0 && d.value < d.target)
+    .sort((a,b) => (a.value/a.target) - (b.value/b.target)).slice(0, 2);
+  const weak = getWeakPointProfile();
+  const focusParts = [phaseFocusLine(cycle.phaseName)];
+  if (weak.categoryRank) focusParts.push(`Weakest self-assessment area: ${weak.categoryRank[0][0]}.`);
+  const goingLine = `Last 7 days: ${activeDays7} active day${activeDays7===1?'':'s'}, ${minutes7} min, ${atGoal} of ${radarData.length} areas at goal.` +
+    (furthest.length ? ` Furthest below: ${furthest.map(d => `${d.axis.toLowerCase()} ${d.value}/${d.target}`).join(', ')} min.` : '');
 
   return `
   <div class="card">
     <div class="phase-banner">
-      <div><div class="phase-name">${escHtml(cycle.phaseName)}</div>
+      <div><div class="phase-name">${escHtml(cycle.phaseName)}${infoIcon(phaseGuidanceText(cycle.phaseName))}</div>
         <div class="small muted">Week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks} &middot; ${App.settings.cycleType}</div></div>
     </div>
-    ${renderPhaseGuidance(cycle.phaseName)}
-    <div class="statgrid" style="margin-top:14px;">
-      <div class="stat"><div class="num">${days.length}</div><div class="lbl">Days logged</div></div>
-      <div class="stat"><div class="num">${climbDayCount}</div><div class="lbl">Climbing days</div></div>
-      <div class="stat"><div class="num">${sinceAssessment}</div><div class="lbl">Since check-in</div></div>
-    </div>
-    ${computeProgressNotes(entries).map(n => `<p class="small muted" style="margin:8px 0 0;">${escHtml(n)}</p>`).join('')}
+    <p class="small" style="margin:10px 0 0;">${escHtml(focusParts.join(' '))}</p>
+    <p class="small muted" style="margin:6px 0 0;">${escHtml(goingLine)}</p>
+    ${computeProgressNotes(entries).map(n => `<p class="small muted" style="margin:6px 0 0;">${escHtml(n)}</p>`).join('')}
   </div>
   ${banners}
-  ${renderRadarCarousel(radarData, focusRadarData)}
-  <div class="card">
-    <h2>Minutes, last 14 days</h2>
-    <div class="chart-legend" style="margin-top:8px;">${legend}</div>
-    <div class="barlist">${minBars}</div>
-  </div>
-  <div class="card">
-    <h2>This week vs. ${tmpl.isTaper ? 'your taper-week shape' : 'your usual rhythm'}${infoIcon(tmpl.isTaper
-      ? 'Taper reference: light touches Mon and Wed, full rest the rest of the week — a different shape than a normal training week on purpose.'
-      : 'Reference rhythm: Mon rest, Tue climb, Wed exercise, Thu climb, Fri rest, Sat/Sun climb.')}</h2>
-    <div class="barlist">${tmplRow}</div>
-    ${tmpl.notes.length ? `<p class="small" style="margin-top:10px;color:var(--red);">${tmpl.notes.join(' ')}</p>` : `<p class="small muted" style="margin-top:10px;">${tmpl.isTaper ? 'Tracking the taper shape so far this week.' : 'Tracking the usual rhythm so far this week.'}</p>`}
-  </div>
+  ${renderRadarCarousel(radarData, focusRadarData, minutesHtml)}
   ${ctas}`;
 }
 
@@ -2409,6 +2425,15 @@ function renderSettings(){
     <button class="btn btn-secondary" onclick="openQuestionnaire()">Take weak-point check-in now</button>
   </div>
   <div class="card">
+    <h2>Weekly goals${infoIcon("Minutes per week you're aiming for in each area. These set the dashed ring on Home's chart and the goal numbers under it. Taper weeks scale them down automatically.")}</h2>
+    <div class="row2">
+      ${RADAR_AXES.map(a => `<div class="field"><label>${escHtml(a.label)} (min)</label>
+        <input type="number" inputmode="numeric" min="0" step="5" value="${getWeeklyTargets(false)[a.key]}"
+          oninput="setWeeklyGoal('${a.key}', this.value)"></div>`).join('')}
+    </div>
+    <button class="btn btn-ghost" onclick="resetWeeklyGoals()">Reset goals to defaults</button>
+  </div>
+  <div class="card">
     <h2>Display</h2>
     <div class="field"><label>Theme</label>
       ${pillsHTML(['Light','Dark'], s.theme.charAt(0).toUpperCase()+s.theme.slice(1), 'setTheme', {sm:true})}
@@ -2649,6 +2674,18 @@ function toggleAssessment(id){ App.ui.expandedAssessment = App.ui.expandedAssess
 function setCycleType(t){ App.settings.cycleType = t; App.render(); }
 function setFontSize(v){ App.settings.fontSize = v.toLowerCase(); App.applyFontSize(); App.saveSettings(); App.render(); }
 function setTheme(v){ App.settings.theme = v.toLowerCase(); App.applyTheme(); App.saveSettings(); App.render(); }
+function setWeeklyGoal(key, v){
+  if (!App.settings.weeklyTargets) App.settings.weeklyTargets = {};
+  const n = Number(v);
+  if (v === '' || !Number.isFinite(n) || n < 0) delete App.settings.weeklyTargets[key];
+  else App.settings.weeklyTargets[key] = Math.round(n);
+}
+function resetWeeklyGoals(){
+  App.settings.weeklyTargets = {};
+  App.saveSettings();
+  App.toast('Goals reset to defaults');
+  App.render();
+}
 function saveSettingsForm(){ App.saveSettings(); App.toast('Settings saved'); App.render(); }
 
 function openQuestionnaire(){ App.ui.qOpen = true; App.ui.qDraft = {}; App.render(); window.scrollTo(0,0); }
@@ -2751,7 +2788,7 @@ window.toggleLogDayType = toggleLogDayType; window.toggleLogFailurePoint = toggl
 window.setClimbLocation = setClimbLocation;
 window.addClimbRow = addClimbRow; window.removeClimbRow = removeClimbRow; window.submitLog = submitLog;
 window.toggleEntry = toggleEntry; window.showMoreEntries = showMoreEntries; window.toggleAssessment = toggleAssessment; window.toggleLagging = toggleLagging; window.setCycleType = setCycleType; window.saveSettingsForm = saveSettingsForm;
-window.setFontSize = setFontSize;
+window.setFontSize = setFontSize; window.setWeeklyGoal = setWeeklyGoal; window.resetWeeklyGoals = resetWeeklyGoals;
 window.setTheme = setTheme;
 window.openSettings = openSettings; window.closeSettings = closeSettings;
 window.openQuestionnaire = openQuestionnaire; window.closeQuestionnaire = closeQuestionnaire;
