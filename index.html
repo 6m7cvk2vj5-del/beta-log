@@ -55,6 +55,13 @@
   textarea{min-height:60px;resize:vertical;}
   textarea.autogrow{resize:none;overflow:hidden;min-height:84px;}
   .acc-head{width:100%;display:flex;justify-content:space-between;align-items:center;background:none;border:none;padding:0;cursor:pointer;color:var(--text);font-family:inherit;text-align:left;}
+  .choice-btn{width:100%;text-align:left;background:var(--surface2);border:1.5px solid var(--border);border-radius:12px;
+    padding:16px 16px;color:var(--text);font-size:0.95rem;line-height:1.4;cursor:pointer;font-family:inherit;}
+  .choice-btn:active{border-color:var(--gold);background:rgba(var(--gold-rgb),.14);}
+  .q-dots{display:flex;gap:6px;margin:0 0 12px;}
+  .q-dot{flex:1;height:5px;border-radius:3px;background:var(--border);}
+  .q-dot.done{background:var(--teal);}
+  .q-dot.now{background:var(--gold);}
   .stepper{display:flex;align-items:center;gap:10px;}
   .step-btn{width:48px;height:48px;flex:none;border-radius:10px;border:1.5px solid var(--border);background:var(--surface2);
     color:var(--text);font-size:1.4rem;line-height:1;padding:0;cursor:pointer;font-family:inherit;}

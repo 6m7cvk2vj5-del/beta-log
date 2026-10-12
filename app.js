@@ -13,20 +13,61 @@ const SESSION_TYPE_OPTIONS = ['Climbing','Fingers','Antagonist / Stabilizer','Fl
 const PAIN_OPTIONS = ['None','Mild, manageable','Recurring issue','Something new'];
 const ADHERENCE_OPTIONS = ['Followed exactly','Mostly followed','Modified a lot','Did something else entirely'];
 const DAY_TYPES = ['Indoor','Outdoor','Bouldering','Sport/Rope','Project','Power','Power-Endurance','Skills/Technique','Fun/Social'];
-const FAILURE_POINT_OPTIONS = ["Grip/forearms gave out","Footwork broke down","Lost the sequence","Couldn't commit to the move","Got pumped","Couldn't reach the hold","Feet cut loose","Mental — backed off"];
+const FAILURE_POINT_OPTIONS = ["Grip/forearms gave out","Footwork broke down","Lost the sequence","Couldn't commit to the move","Got pumped","Couldn't reach the hold","Too stiff for the move","Feet cut loose","Mental — backed off"];
 // General tags for Strength/Antagonist (legs folded in here as a muscle group, not a separate type)
 // and Core, so logging doesn't require hunting through a long named-exercise list every time.
 // What broke down, for non-climbing workouts. Each tag maps to one of the check-in categories so
 // repeated breakdowns can move the weak-point profile (see getCategoryScores).
-const WORKOUT_BREAKDOWN_OPTIONS = ["Grip/forearms gave out","Shoulders gave out","Core gave out","Legs gave out","Lost form","Ran out of energy","Had to cut it short","Mental — lost focus"];
+const WORKOUT_BREAKDOWN_OPTIONS = ["Grip/forearms gave out","Shoulders gave out","Core gave out","Legs gave out","Too tight to get into position","Lost form","Ran out of energy","Had to cut it short","Mental — lost focus"];
 const BREAKDOWN_CATEGORY = {
-  "Grip/forearms gave out":'physical', "Got pumped":'physical', "Shoulders gave out":'physical', "Core gave out":'physical',
-  "Legs gave out":'physical', "Ran out of energy":'physical', "Had to cut it short":'physical',
-  "Footwork broke down":'technique', "Lost the sequence":'technique', "Couldn't reach the hold":'technique',
-  "Feet cut loose":'technique', "Lost form":'technique',
-  "Couldn't commit to the move":'mental', "Mental — backed off":'mental', "Mental — lost focus":'mental',
+  "Grip/forearms gave out":'strength', "Got pumped":'strength', "Shoulders gave out":'strength', "Core gave out":'strength',
+  "Legs gave out":'strength', "Ran out of energy":'strength', "Had to cut it short":'strength',
+  "Couldn't reach the hold":'mobility', "Too stiff for the move":'mobility', "Too tight to get into position":'mobility',
+  "Footwork broke down":'coordination', "Feet cut loose":'coordination', "Lost form":'coordination',
+  "Lost the sequence":'awareness', "Couldn't commit to the move":'awareness', "Mental — backed off":'awareness', "Mental — lost focus":'awareness',
 };
-function breakdownOptionsFor(type){ return type === 'Climbing' ? FAILURE_POINT_OPTIONS : WORKOUT_BREAKDOWN_OPTIONS; }
+// The four areas the profile tracks. Each check-in compares them in pairs (which one limits you more),
+// so the result is relative: it shows which area is lagging, not an absolute grade.
+const AREAS = [
+  {key:'strength', label:'Strength'}, {key:'mobility', label:'Mobility'},
+  {key:'coordination', label:'Coordination'}, {key:'awareness', label:'Awareness'},
+];
+const AREA_LABEL = { strength:'Strength', mobility:'Mobility', coordination:'Coordination', awareness:'Awareness' };
+const AREA_HELP = { strength:'fingers, pulling, power, endurance', mobility:'range of motion and tension in hips and shoulders',
+  coordination:'footwork, precision, balance and timing', awareness:'attention, nerve, reading the sequence, breathing' };
+const AREA_STATEMENTS = {
+  strength: ["My fingers or forearms give out before I run out of ideas.", "I can see the move but I can't pull or hold it.",
+    "I run out of power on the hardest moves.", "I pump out on climbs that should feel easy."],
+  mobility: ["I can't get my hips close to the wall or my foot high enough.", "Stiff hips or shoulders stop me getting into the position I want.",
+    "I avoid moves that need a big stretch or a high step.", "The same spots feel tight after a session."],
+  coordination: ["My feet are sloppy on small holds.", "I lose my balance mid-move and swing off.",
+    "I mistime dynamic moves.", "I place a foot, then have to readjust it."],
+  awareness: ["I tense up or hesitate at the crux.", "I lose the sequence or miss holds I could use.",
+    "I climb on autopilot without noticing what my body is doing.", "I hold my breath or grip harder when it gets tough."],
+};
+const AREA_PAIRS = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
+// Six comparisons, one for every pair of areas. Statements rotate with each check-in so the wording
+// doesn't repeat, and the A/B sides alternate so one side isn't favoured by position.
+function buildCheckinPairs(round){
+  const used = { strength:0, mobility:0, coordination:0, awareness:0 };
+  return AREA_PAIRS.map(([x, y], n) => {
+    let a = AREAS[x].key, b = AREAS[y].key;
+    const ia = (round * 3 + used[a]++) % 4, ib = (round * 3 + used[b]++) % 4;
+    const pair = { a, b, ta: AREA_STATEMENTS[a][ia], tb: AREA_STATEMENTS[b][ib] };
+    if ((round + n) % 2 === 1) return { a: b, b: a, ta: pair.tb, tb: pair.ta };
+    return pair;
+  });
+}
+// Occasional objective checks, run during taper weeks or from Settings. Bodyweight only.
+const BENCHMARKS = [
+  {key:'pullups', label:'Pull-ups', unit:'reps', area:'strength', how:'Strict reps from a dead hang, chin over the bar, no kipping. Stop when form slips.'},
+  {key:'deadhang', label:'Dead hang', unit:'sec', area:'strength', how:'Hang from a bar with an active shoulder, as long as you can hold it well.'},
+  {key:'squathold', label:'Deep squat hold', unit:'sec', area:'mobility', how:'Heels flat, chest up, as low as you can go. Seconds you can stay comfortable, up to 120.'},
+  {key:'balance', label:'Single-leg balance, eyes closed', unit:'sec', area:'coordination', how:'Weaker side, hands on hips, standing on a firm floor. Stop at a hop, touch-down or 60 sec.'},
+  {key:'pushups', label:'Push-ups', unit:'reps', area:'antagonist', how:'Strict reps, chest close to the floor, body in one line.'},
+  {key:'sideplank', label:'Side plank, weaker side', unit:'sec', area:'antagonist', how:'On a forearm, hips lifted in a straight line. Stop when the hips drop.'},
+  {key:'wallangel', label:'Wall angels', unit:'reps', area:'antagonist', how:'Back and forearms against a wall, slide the arms up and down. Count reps with contact held.'},
+];function breakdownOptionsFor(type){ return type === 'Climbing' ? FAILURE_POINT_OPTIONS : WORKOUT_BREAKDOWN_OPTIONS; }
 const MUSCLE_GROUPS = ['Upper body push','Upper body pull','Legs','Grip/forearms','Full body'];
 const POWER_LEVELS = ['Max strength/heavy','Power/explosive','Endurance/high-rep','Stability/control'];
 const CORE_REGIONS = ['Upper abs','Lower abs','Obliques','Full core/anti-rotation'];
@@ -610,6 +651,7 @@ const LS = {
   assessments: 't4c_assessments',
   lastPlan: 't4c_last_plan',
   lastAsk: 't4c_last_ask',
+  benchmarks: 't4c_benchmarks',
 };
 
 const App = {
@@ -617,10 +659,11 @@ const App = {
   entries: [],
   _entriesVersion: 0, // bumped by saveEntries(); invalidates the day-aggregation caches
   assessments: [],
+  benchmarks: [], // [{id, date, test, value}] from the benchmark tests
   lastAsk: null, // the most recent plan request (types, minutes, climbing setup), for the quick-start chips
   lastPlan: null, // the most recently generated plan, persisted so it survives a reload/close
   ui: { tab:'home', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
-        qDraft: {}, qSubset:null, askStep:1, planEditing:false, shareOpen:false, issuesOpen:false, addTypeOpen:false, settingsSections:{}, askMoreOpen:false, timeOther:{}, logSummaryMode:false, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planText:'',
+        qPairs:null, qPicks:[], benchOpen:false, benchIndex:0, benchDraft:{}, askStep:1, planEditing:false, shareOpen:false, issuesOpen:false, addTypeOpen:false, settingsSections:{}, askMoreOpen:false, timeOther:{}, logSummaryMode:false, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planText:'',
         editingId:null, planFeedback:'', lastPlanContext:null,
         importLoading:false, importError:'', infoPopup:null, entriesShown:50, streaming:false, logMoreOpen:false, logExtraFields:[], radarData:{}, radarSlide:0, radarSlideCount:1, swapHistory:{},
         timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false, expanded:false },
@@ -630,6 +673,7 @@ const App = {
     try { const s = localStorage.getItem(LS.settings); if (s) this.settings = Object.assign(this.settings, JSON.parse(s)); } catch(e){}
     try { const e = localStorage.getItem(LS.entries); if (e) this.entries = JSON.parse(e); } catch(e){}
     try { const a = localStorage.getItem(LS.assessments); if (a) this.assessments = JSON.parse(a); } catch(e){}
+    try { const b = localStorage.getItem(LS.benchmarks); if (b) this.benchmarks = JSON.parse(b); } catch(e){}
     try { const p = localStorage.getItem(LS.lastPlan); if (p) this.lastPlan = JSON.parse(p); } catch(e){}
     // The last plan request pre-fills Ask, so the usual session is one tap away.
     try {
@@ -684,6 +728,7 @@ const App = {
   saveSettings() { localStorage.setItem(LS.settings, JSON.stringify(this.settings)); },
   saveEntries() { this._entriesVersion++; localStorage.setItem(LS.entries, JSON.stringify(this.entries)); },
   saveAssessments() { localStorage.setItem(LS.assessments, JSON.stringify(this.assessments)); },
+  saveBenchmarks() { localStorage.setItem(LS.benchmarks, JSON.stringify(this.benchmarks)); },
   // `context` is the exact system prompt + user message the plan came from. Persisted with the plan
   // so "Want to adjust this?" still sees the original request after a reload or a return via
   // "See most recent workout" — in-memory only, the adjust would silently become a fresh plan.
@@ -1077,12 +1122,24 @@ function detectPatterns(entries){
   return flags;
 }
 
-// Check-in scores (0-5, higher is better) as they stand today: the latest check-in, lowered a little
-// by what has actually broken down in the last 30 days. Each category loses up to 1.5 points in
-// proportion to how often it broke down per session, so a check-in answered months ago keeps moving.
+// The latest profile check-in (the current, forced-choice format). Older mental/technique/physical
+// check-ins stay in the history but don't drive the chart.
+function latestProfile(){
+  for (let i = App.assessments.length - 1; i >= 0; i--) if (App.assessments[i].version === 2) return App.assessments[i];
+  return null;
+}
+function previousProfile(){
+  let seen = 0;
+  for (let i = App.assessments.length - 1; i >= 0; i--) if (App.assessments[i].version === 2 && ++seen === 2) return App.assessments[i];
+  return null;
+}
+// Area scores (0-5, higher is stronger relative to your other areas) as they stand today: the latest
+// check-in, lowered a little by what has actually broken down in the last 30 days. Each area loses up
+// to 1.5 points in proportion to how often it broke down per session, so a check-in from weeks ago
+// keeps moving with what you actually log.
 function getBreakdownSummary(days){
   const todayMs = new Date(todayISO()).getTime();
-  const counts = { mental:0, technique:0, physical:0 }, labels = {};
+  const counts = { strength:0, mobility:0, coordination:0, awareness:0 }, labels = {};
   let sessions = 0;
   App.entries.forEach(e => {
     const ago = daysAgoFrom(todayMs, e.date);
@@ -1094,73 +1151,78 @@ function getBreakdownSummary(days){
       counts[c]++; labels[l] = (labels[l] || 0) + 1;
     });
   });
-  const total = counts.mental + counts.technique + counts.physical;
+  const total = counts.strength + counts.mobility + counts.coordination + counts.awareness;
   const top = Object.entries(labels).sort((a,b)=> b[1]-a[1]).slice(0,3);
   return { counts, labels: top, sessions, total };
 }
 function getCategoryScores(){
-  const latest = App.assessments[App.assessments.length - 1];
+  const latest = latestProfile();
   if (!latest) return null;
   const br = getBreakdownSummary(30);
   const raw = {}, adjusted = {};
-  ['mental','technique','physical'].forEach(c => {
-    raw[c] = latest.scores[c];
-    const penalty = Math.min(1.5, 1.5 * br.counts[c] / Math.max(4, br.sessions)); // at least 4 sessions' worth, so two bad days can't zero a category
+  AREAS.forEach(({key: c}) => {
+    raw[c] = latest.areas[c];
+    const penalty = Math.min(1.5, 1.5 * br.counts[c] / Math.max(4, br.sessions)); // at least 4 sessions' worth, so two bad days can't sink an area
     adjusted[c] = Math.max(0, raw[c] - penalty);
   });
   return { raw, adjusted, breakdown: br, latest, adjustedAny: br.total > 0 };
 }
-// Weak-point profile: lowest-scoring category from the most recent assessment,
-// blended with which FOCUS_AREAS have gotten the least attention in the log.
+// Weak-point profile: the lowest area from the latest check-in (adjusted by recent breakdowns),
+// alongside which FOCUS_AREAS have gotten the least attention in the log.
 function getWeakPointProfile(){
-  const latest = App.assessments[App.assessments.length - 1];
   let categoryRank = null;
   const cs = getCategoryScores();
-  if (latest && cs) {
-    categoryRank = Object.entries(cs.adjusted).sort((a,b)=> a[1]-b[1]);
-  }
+  if (cs) categoryRank = Object.entries(cs.adjusted).sort((a,b)=> a[1]-b[1]);
   const counts = {};
   FOCUS_AREAS.forEach(a => counts[a] = 0);
   App.entries.forEach(e => arr(e.focus).forEach(a => { counts[a] = (counts[a]||0) + 1; }));
   const leastWorked = Object.entries(counts).sort((a,b)=> a[1]-b[1]).slice(0,3).map(x=>x[0]);
   return { categoryRank, leastWorked, breakdownLabels: cs ? cs.breakdown.labels : getBreakdownSummary(30).labels };
 }
-// Mental/technique/physical self-assessment as a radar, comparing your two most recent check-ins
-// so it shows actual movement over time rather than repeating the same bar-list a single check-in
-// already gives you in Settings. Returns null when there's nothing to show yet.
+// The four-area profile as a radar. Category averages sit close together, so the chart is scaled to
+// the range you actually have: the edge is a bit above your highest area, the centre a bit below your
+// lowest. Tapping an axis gives the plain-words detail. Returns null before the first check-in.
 function computeWeakPointRadarData(){
-  if (App.assessments.length === 0) return null;
-  const catLabels = { mental:'Mental', technique:'Technique', physical:'Physical' };
-  const cats = ['mental','technique','physical'];
+  const latest = latestProfile();
+  if (!latest) return null;
   const cs = getCategoryScores();
-  const latest = cs.latest;
-  const previous = App.assessments.length >= 2 ? App.assessments[App.assessments.length - 2] : null;
+  const previous = previousProfile();
   const adj = cs.adjustedAny;
-  const shownVals = cats.map(c => adj ? cs.adjusted[c] : cs.raw[c]);
-  const cmpVals = adj ? cats.map(c => cs.raw[c]) : (previous ? cats.map(c => previous.scores[c]) : null);
-  // Category averages sit close together (each is a mean of several answers), so on a fixed 0-5
-  // axis the shape barely moves. Scale the chart to the range you actually have: the edge is a bit
-  // above your highest category, the centre a bit below your lowest. Tapping an axis gives the real score.
+  const keys = AREAS.map(a => a.key);
+  const shownVals = keys.map(c => adj ? cs.adjusted[c] : cs.raw[c]);
+  const cmpVals = adj ? keys.map(c => cs.raw[c]) : (previous ? keys.map(c => previous.areas[c]) : null);
   const all = shownVals.concat(cmpVals || []);
   let lo = Math.min(...all) - 0.4, hi = Math.max(...all) + 0.4;
   if (hi - lo < 1.2) { const mid = (hi + lo) / 2; lo = mid - 0.6; hi = mid + 0.6; }
   lo = Math.max(0, lo); hi = Math.min(5, hi);
   const scale = v => Math.max(4, Math.round((v - lo) / (hi - lo) * 100));
-  const data = cats.map((c, i) => {
-    let detail = `${catLabels[c]}: ${cs.raw[c].toFixed(1)} / 5 from your ${latest.date} check-in.`;
-    if (adj && cs.adjusted[c] < cs.raw[c] - 0.04) detail = `${catLabels[c]}: ${cs.adjusted[c].toFixed(1)} / 5 after ${cs.breakdown.counts[c]} breakdown${cs.breakdown.counts[c]===1?'':'s'} in the last 30 days (check-in said ${cs.raw[c].toFixed(1)}).`;
+  const n = (latest.picksCount || 3);
+  const data = keys.map((c, i) => {
+    const pts = latest.points ? latest.points[c] : null;
+    let detail = pts !== null && pts !== undefined
+      ? `${AREA_LABEL[c]}: named as the limiter ${pts} time${pts === 1 ? '' : 's'} out of ${n} in your ${latest.date} check-in (${AREA_HELP[c]}).`
+      : `${AREA_LABEL[c]}: from your ${latest.date} check-in.`;
+    if (adj && cs.adjusted[c] < cs.raw[c] - 0.04) detail += ` Lowered after ${cs.breakdown.counts[c]} breakdown${cs.breakdown.counts[c]===1?'':'s'} in the last 30 days.`;
     else if (previous) {
-      const delta = cs.raw[c] - previous.scores[c];
-      const trend = delta > 0.05 ? `Up from ${previous.scores[c].toFixed(1)}` : delta < -0.05 ? `Down from ${previous.scores[c].toFixed(1)}` : `About the same as ${previous.scores[c].toFixed(1)}`;
-      detail += ` ${trend} on ${previous.date}.`;
+      const delta = cs.raw[c] - previous.areas[c];
+      detail += delta > 0.05 ? ' Better than last time.' : delta < -0.05 ? ' Worse than last time.' : ' About the same as last time.';
     }
-    return { axis: catLabels[c], pct: scale(shownVals[i]), value: shownVals[i], detail };
+    return { axis: AREA_LABEL[c], pct: scale(shownVals[i]), value: shownVals[i], detail };
   });
   const compareData = cmpVals ? cmpVals.map(v => ({ pct: scale(v) })) : null;
   return { data, compareData, latestDate: latest.date, previousDate: adj ? null : (previous ? previous.date : null), adjusted: adj,
     range: [lo, hi] };
 }
 
+// ISO date of the first day of the current cycle week (weeks are counted from the cycle start date).
+function cycleWeekStartISO(){
+  const start = new Date(App.settings.cycleStartDate + 'T00:00:00');
+  const today = new Date(todayISO() + 'T00:00:00');
+  let daysSince = Math.round((today - start) / 86400000);
+  if (daysSince < 0) daysSince = 0;
+  const ws = new Date(start); ws.setDate(ws.getDate() + Math.floor(daysSince / 7) * 7);
+  return toLocalISO(ws);
+}
 // Where you stand on your own weekly guidelines — completed vs. not, nothing else. Pure
 // computation from data already tracked elsewhere, no API call needed.
 function computeBriefing(entries){
@@ -1499,6 +1561,23 @@ function relevantExerciseBankText(sessionTypes, routineStyle){
   return lines.join('\n');
 }
 
+// One line for the plan prompt: how consistently antagonist/stabilizer work has been done and the
+// latest benchmark results for it, so the plan can lean on it when it has slipped.
+function antagonistPromptLine(){
+  const goal = getWeeklyTargets(false).antag;
+  const byWeek = {};
+  dayList(App.entries).forEach(d => { const k = getWeekDates(d.date)[0]; byWeek[k] = (byWeek[k] || 0) + (d.timeAntag || 0); });
+  const thisMonday = new Date(getWeekDates(todayISO())[0] + 'T00:00:00');
+  let hit = 0;
+  for (let k = 0; k < 8; k++) { const m = new Date(thisMonday); m.setDate(m.getDate() - k * 7); if (goal > 0 && (byWeek[toLocalISO(m)] || 0) >= goal) hit++; }
+  const bits = BENCHMARKS.filter(b => b.area === 'antagonist').map(b => {
+    const list = App.benchmarks.filter(x => x.test === b.key).sort((a,c) => a.date.localeCompare(c.date));
+    if (!list.length) return null;
+    const last = list[list.length - 1], prev = list.length > 1 ? list[list.length - 2] : null;
+    return `${b.label} ${last.value} ${b.unit}${prev ? ` (was ${prev.value})` : ''}`;
+  }).filter(Boolean);
+  return `Antagonist/stabilizer work: weekly goal of ${goal} min met in ${hit} of the last 8 weeks.${bits.length ? ' Latest benchmarks: ' + bits.join('; ') + '.' : ''}\n`;
+}
 async function askClaude(feedback){
   const key = (App.settings.apiKey||'').trim();
   if (!key) { App.ui.planError = 'Add your Anthropic API key in Settings first.'; App.render(); return; }
@@ -1581,11 +1660,11 @@ async function askClaude(feedback){
     const guidelineLine = guidelines.filter(g=>!g.ok).map(g=>g.label).join(', ') || 'all on track this week';
     // Weak-point profile is always sent as background, independent of which priority-focus mode
     // is selected — it shouldn't disappear just because you picked a specific focus area instead.
-    const mentalIsWeakest = !!(weak.categoryRank && weak.categoryRank[0][0] === 'mental');
+    const mentalIsWeakest = !!(weak.categoryRank && weak.categoryRank[0][0] === 'awareness');
     const weakPointLine = weak.categoryRank
-      ? `Weakest category from self-assessment, adjusted by recent breakdowns: ${weak.categoryRank[0][0]} (${weak.categoryRank[0][1].toFixed(1)}/5). Least-worked focus areas in the log: ${weak.leastWorked.join(', ')}.` +
+      ? `Profile check-in (relative: which area limits them most), adjusted by recent breakdowns, weakest to strongest: ${weak.categoryRank.map(x => AREA_LABEL[x[0]] + ' ' + x[1].toFixed(1)).join(', ')}. Least-worked focus areas in the log: ${weak.leastWorked.join(', ')}.` +
         (weak.breakdownLabels.length ? ` What has broken down most in the last 30 days: ${weak.breakdownLabels.map(x => x[0] + ' x' + x[1]).join(', ')}.` : '')
-      : 'No weak-point check-in taken yet.';
+      : 'No profile check-in taken yet.';
 
     let focusLine = '';
     if (d.focusMode === 'other' && d.focusOther.trim()) {
@@ -1653,7 +1732,7 @@ async function askClaude(feedback){
       "climbing session by default — a specific visualization cue, a note on committing to a move instead of " +
       "hesitating — a sentence or two is enough, it doesn't need its own time block. ESCALATE this to a real, " +
       "dedicated mental-work block with actual time allotted (not just a line) whenever either is true: they've " +
-      "explicitly requested a mental-heavy session today, or their self-assessment flags mental as the weakest " +
+      "explicitly requested a mental-heavy session today, or their profile flags awareness (the mental side) as the weakest area " +
       "category — in either case build in deliberate practice (extended visualization before an attempt, " +
       "purposely working a move that triggers hesitation, a pre-climb routine, working through a specific fear " +
       "like a big move or an exposed position) as a real part of the session, not an aside. Design climbing " +
@@ -1735,6 +1814,7 @@ async function askClaude(feedback){
       `Current pain status (most recent entry): ${mostRecentPain}${getActivePainRegions(App.entries).length ? ' — affected regions: ' + getActivePainRegions(App.entries).join(', ') : ''}\n` +
       `This week vs. usual rhythm: ${tmplLine}\n` +
       `Weekly guidelines not yet hit this week: ${guidelineLine}\n` +
+      `${antagonistPromptLine()}` +
       `Body regions not yet touched by logged work in the last 7 days (use these for prehab): ${computePrehabCoverage(App.entries).missing.join(', ') || 'all covered'}\n` +
       `Weak-point profile (background context regardless of today's priority-focus choice): ${weakPointLine}\n` +
       (drillLine ? `Climbing portion request: ${drillLine}\n` : '') +
@@ -1750,7 +1830,7 @@ async function askClaude(feedback){
           (d.climbLocation === 'Outdoor' ? ' — no board/campus/gym-only tools; reference their outdoor grade.\n' : d.climbLocation === 'Indoor' ? ' — reference their indoor grade.\n' : '.\n')
         : '') +
       (d.mentalFocus ? `- Explicitly requested a mental-heavy session today.\n` : '') +
-      (mentalIsWeakest ? `- Mental is the weakest category from their self-assessment.\n` : '') + `\n` +
+      (mentalIsWeakest ? `- Awareness (attention, nerve, reading the sequence, breathing) is the weakest area in their profile.\n` : '') + `\n` +
       (relevantExerciseBankText(d.sessionTypes, d.routineStyle) ? `Their own named exercise bank for today's relevant routines (see FORMAT REQUIREMENT below):\n${relevantExerciseBankText(d.sessionTypes, d.routineStyle)}\n\n` : '') +
       `Give today's plan.`;
 
@@ -2321,13 +2401,14 @@ function toggleShareMenu(){ App.ui.shareOpen = !App.ui.shareOpen; App.render(); 
 function toggleLogMore(){ App.ui.logMoreOpen = !App.ui.logMoreOpen; App.render(); }
 
 App.render = function(){
-  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', !App.ui.qOpen && !App.ui.settingsOpen && b.dataset.tab === App.ui.tab));
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', !App.ui.qOpen && !App.ui.benchOpen && !App.ui.settingsOpen && b.dataset.tab === App.ui.tab));
   const planBtn = document.getElementById('planTabBtn');
   if (planBtn) planBtn.classList.toggle('hidden', !App.ui.planUnlocked);
   const gearBtn = document.getElementById('gearBtn');
   if (gearBtn) gearBtn.classList.toggle('gear-active', App.ui.settingsOpen);
   const panel = document.getElementById('panels');
   if (App.ui.qOpen) { panel.innerHTML = renderQuestionnaire(); }
+  else if (App.ui.benchOpen) { panel.innerHTML = renderBenchmarkFlow(); }
   else if (App.ui.settingsOpen) { panel.innerHTML = renderSettings(); }
   else if (App.ui.tab === 'home') panel.innerHTML = renderHome();
   else if (App.ui.tab === 'ask') panel.innerHTML = renderAsk();
@@ -2572,23 +2653,64 @@ function renderWeakPointRadarCardStandalone(){
     ${wp.previousDate ? `<p class="small muted" style="text-align:center;margin-top:6px;">Gold: ${escHtml(wp.latestDate)} &middot; Dashed: ${escHtml(wp.previousDate)}</p>` : ''}
   </div>`;
 }
+// Training consistency (weekly antagonist/stabilizer minutes against your goal, last 8 weeks) and
+// the results of the benchmark tests that measure how you actually do at that work.
+function renderAntagonistCard(){
+  const goal = getWeeklyTargets(false).antag;
+  const days = dayList(App.entries);
+  const byWeek = {};
+  days.forEach(d => { const k = getWeekDates(d.date)[0]; byWeek[k] = (byWeek[k] || 0) + (d.timeAntag || 0); });
+  const thisMonday = new Date(getWeekDates(todayISO())[0] + 'T00:00:00');
+  const weeks = [];
+  for (let k = 7; k >= 0; k--) { const m = new Date(thisMonday); m.setDate(m.getDate() - k * 7); weeks.push({ key: toLocalISO(m), min: byWeek[toLocalISO(m)] || 0 }); }
+  const hit = weeks.filter(w => goal > 0 && w.min >= goal).length;
+  const bars = weeks.map((w, i) => {
+    const h = goal > 0 ? Math.min(100, Math.round(w.min / goal * 100)) : 0;
+    const met = goal > 0 && w.min >= goal;
+    return `<div title="${w.key}: ${w.min} min" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:56px;">
+      <div style="height:${Math.max(4, h)}%;background:${met ? 'var(--teal)' : 'var(--cat-antag)'};opacity:${i === 7 ? 1 : 0.8};border-radius:3px;"></div></div>`;
+  }).join('');
+  const cov = computePrehabCoverage(App.entries);
+  const antagTests = BENCHMARKS.filter(b => b.area === 'antagonist');
+  const rows = antagTests.map(b => {
+    const list = App.benchmarks.filter(x => x.test === b.key).sort((a,c) => a.date.localeCompare(c.date));
+    if (!list.length) return `<div class="bar-row"><div class="bar-label" style="width:auto;flex:1;">${escHtml(b.label)}</div><div class="bar-val muted" style="width:auto;">not tested</div></div>`;
+    const last = list[list.length - 1], prev = list.length > 1 ? list[list.length - 2] : null;
+    const delta = prev ? last.value - prev.value : null;
+    return `<div class="bar-row" style="align-items:baseline;"><div class="bar-label" style="width:auto;flex:1;color:var(--text);">${escHtml(b.label)}</div>
+      <div class="bar-val" style="width:auto;"><b>${last.value}</b> ${b.unit}${delta === null || delta === 0 ? '' : ` <span class="small" style="color:${delta > 0 ? 'var(--teal)' : 'var(--red)'};">${delta > 0 ? '+' : ''}${delta}</span>`}</div></div>`;
+  }).join('');
+  return `
+    <div class="small muted" style="margin-bottom:6px;">How much you train it &middot; last 8 weeks</div>
+    <div style="display:flex;gap:5px;align-items:flex-end;">${bars}</div>
+    <p class="small" style="margin:8px 0 14px;">Hit your ${goal}-minute weekly goal in <b>${hit} of 8</b> weeks. Whole-body prehab this week: <b>${cov.covered.length} of ${PREHAB_REGIONS.length}</b> regions.</p>
+    <div class="small muted" style="margin-bottom:6px;">How you do at it &middot; latest benchmarks</div>
+    <div class="barlist">${rows}</div>
+    <button class="btn btn-ghost" style="margin-top:10px;" onclick="openBenchmarks()">Run the benchmark tests</button>`;
+}
 function renderRadarCarousel(radarData, focusRadarData, minutesHtml){
   const slides = [
     { title: 'Last 7 days vs. your goals', tooltip: 'Minutes in each area over the trailing 7 days. Dashed ring = your weekly goal; gold = what you did. Tap an axis for the minutes. Goals are adjustable in Settings, and taper weeks scale them down.', chartId: 'weeklyBalance', data: radarData, below: `<p class="small muted" style="text-align:center;margin-top:6px;">Tap an axis for minutes against your goal.</p>` },
     { title: 'Minutes, last 14 days', tooltip: 'Each logged day, stacked by what you actually did.', html: minutesHtml },
     { title: 'Focus area attention', tooltip: 'Last 10 days of logged sessions — the same window used when referencing your recent history for a plan request. Tap an axis for the numbers.', chartId: 'focusAttention', data: focusRadarData },
   ];
+  slides.push({ title: 'Antagonist & stabilizers', tooltip: 'How consistently you train the opposing and supporting muscles, and how you do on the benchmark tests. Benchmarks are run in taper weeks or from Settings.', html: renderAntagonistCard() });
   const wp = computeWeakPointRadarData();
+  if (!wp) {
+    slides.push({ title: 'Profile', tooltip: 'Six quick comparisons between strength, mobility, coordination and awareness show which one limits you most.',
+      html: `<p class="small" style="margin:0 0 12px;">Six quick comparisons show which of strength, mobility, coordination and awareness is lagging. Takes about a minute, and what you log keeps it current.</p>
+        <button class="btn btn-primary" onclick="openQuestionnaire()">Start the profile check-in</button>` });
+  }
   if (wp) {
     slides.push({
-      title: 'Self-assessment',
+      title: 'Your profile',
       tooltip: wp.adjusted
-        ? 'Your latest check-in, lowered a little in any area that has been breaking down in logged sessions over the last 30 days. Dashed = the check-in as you answered it. Tap an axis for the numbers.'
+        ? 'Your latest check-in, lowered a little in any area that has been breaking down in logged sessions over the last 30 days. Dashed = the check-in as you answered it. Tap an area for detail.'
         : wp.previousDate
-        ? `Comparing your ${wp.latestDate} check-in (solid, gold) against your ${wp.previousDate} check-in (dashed outline). Tap an axis for the numbers.`
-        : 'From your most recent weak-point check-in. Take another to start seeing how this shifts over time. Tap an axis for the numbers.',
+        ? `Your ${wp.latestDate} check-in (gold) against ${wp.previousDate} (dashed). Tap an area for detail.`
+        : 'From your latest profile check-in. Take another to see how this shifts over time. Tap an area for detail.',
       chartId: 'weakPoint', data: wp.data, compareData: wp.compareData,
-      caption: (wp.adjusted ? 'Gold: check-in adjusted by the last 30 days of breakdowns &middot; Dashed: as you answered it' : (wp.previousDate ? `Gold: ${wp.latestDate} &middot; Dashed: ${wp.previousDate}` : 'Gold: your latest check-in')) + `<br>Scaled to your own range (${wp.range[0].toFixed(1)} to ${wp.range[1].toFixed(1)} out of 5) so differences show. Tap an axis for the real score.`,
+      caption: (wp.adjusted ? 'Gold: your check-in, lowered where things keep breaking down &middot; Dashed: as answered' : (wp.previousDate ? `Gold: ${wp.latestDate} &middot; Dashed: ${wp.previousDate}` : 'Gold: your latest check-in')) + '<br>Outward means stronger relative to your other areas. Scaled to your own range so differences show. Tap an area for detail.',
     });
     App.ui.radarData.weakPoint = wp.data;
   }
@@ -2627,12 +2749,24 @@ function renderHome(){
     bannerList.push(`<div class="banner warn"><b>Pain still flagged:</b> ${escHtml(painStatus)}${getActivePainRegions(App.entries).length ? ' (' + escHtml(getActivePainRegions(App.entries).join(', ')) + ')' : ''} — from your most recent entry, sent with every plan request.
       <div style="margin-top:8px;"><button class="btn btn-ghost" style="width:auto;padding:8px 14px;" onclick="clearPainFlag()">Turn off — no pain today</button></div></div>`);
   }
-  if (canQuickCheckin() ? dueCount >= QUICK_CHECKIN_EVERY : dueCount >= 24) {
-    bannerList.push(canQuickCheckin()
-      ? `<div class="banner info"><b>Quick check-in available.</b> ${dueCount} climbing sessions since your last one. Six questions, under a minute, and it keeps your profile current.
-        <div style="margin-top:8px;"><button class="btn btn-secondary" onclick="openQuestionnaire(true)">Take the quick check-in</button></div></div>`
-      : `<div class="banner info"><b>Weak-point check-in due.</b> You've logged ${dueCount} climbing sessions since your last one.
-        <div style="margin-top:8px;"><button class="btn btn-secondary" onclick="openQuestionnaire()">Take the check-in (2 min)</button></div></div>`);
+  const profile = latestProfile();
+  const inTaper = cycle.phaseName === 'Taper';
+  const weekStart = cycleWeekStartISO();
+  const profileDone = !!(profile && profile.date >= weekStart);
+  const benchDone = App.benchmarks.some(b => b.date >= weekStart);
+  if (inTaper && !(profileDone && benchDone)) {
+    // Taper week is the natural moment to re-check where you are: volume is low and you are fresh.
+    bannerList.push(`<div class="banner info"><b>Taper week: a good time to re-assess.</b> You're fresh and volume is low, so check your profile and benchmark your strengths.
+      <div class="pillrow" style="margin-top:8px;">
+        ${profileDone ? '' : `<button class="btn btn-secondary" style="width:auto;padding:8px 14px;" onclick="openQuestionnaire()">Profile check-in (1 min)</button>`}
+        ${benchDone ? '' : `<button class="btn btn-secondary" style="width:auto;padding:8px 14px;" onclick="openBenchmarks()">Benchmarks (about 5 min)</button>`}
+      </div></div>`);
+  } else if (!profile && App.entries.length >= 1) {
+    bannerList.push(`<div class="banner info"><b>Set up your profile.</b> Six quick comparisons show which of strength, mobility, coordination and awareness is lagging.
+      <div style="margin-top:8px;"><button class="btn btn-secondary" onclick="openQuestionnaire()">Start (1 min)</button></div></div>`);
+  } else if (profile && dueCount >= PROFILE_EVERY) {
+    bannerList.push(`<div class="banner info"><b>Profile check-in available.</b> ${dueCount} climbing sessions since your last one.
+      <div style="margin-top:8px;"><button class="btn btn-secondary" onclick="openQuestionnaire()">Take it (1 min)</button></div></div>`);
   }
   flags.forEach(f => { bannerList.push(`<div class="banner warn">${escHtml(f)}</div>`); });
   // At most two notes up here; the rest are one tap away in the Ask briefing.
@@ -2712,7 +2846,7 @@ function renderHome(){
   const light = radarData.filter(d => d.target > 0 && d.value / d.target < 0.5);
   const weak = getWeakPointProfile();
   const focusParts = [phaseFocusLine(cycle.phaseName)];
-  if (weak.categoryRank) focusParts.push(`Weakest area: ${weak.categoryRank[0][0]}.`);
+  if (weak.categoryRank) focusParts.push(`Weakest area: ${AREA_LABEL[weak.categoryRank[0][0]].toLowerCase()}.`);
   if (weak.breakdownLabels.length && weak.breakdownLabels[0][1] >= 2) focusParts.push(`Keeps breaking down on: ${weak.breakdownLabels[0][0].toLowerCase()}.`);
   const goingParts = [];
   if (onTrack.length) goingParts.push(`On track this week: ${names(onTrack)}.`);
@@ -2741,7 +2875,6 @@ function renderBriefingCard(){
   const isTaper = getCycleState(App.settings).phaseName === 'Taper';
   const flags = detectPatterns(entries);
   const weak = getWeakPointProfile();
-  const catLabels = {mental:'Mental', technique:'Technique', physical:'Physical'};
   const open = App.ui.laggingOpen;
 
   const guidelinesPart = isTaper
@@ -2758,7 +2891,7 @@ function renderBriefingCard(){
     ${open ? `<div style="margin-top:10px;">
       ${guidelinesPart}
       ${flags.map(f=>`<p class="small" style="margin:4px 0;">${escHtml(f)}</p>`).join('')}
-      ${weak.categoryRank ? `<p class="small" style="margin:4px 0;">Weakest self-assessment category: <b>${escHtml(catLabels[weak.categoryRank[0][0]]||weak.categoryRank[0][0])}</b>.</p>` : ''}
+      ${weak.categoryRank ? `<p class="small" style="margin:4px 0;">Weakest area in your profile: <b>${escHtml(AREA_LABEL[weak.categoryRank[0][0]])}</b>.</p>` : ''}
       ${weak.leastWorked.length ? `<p class="small" style="margin:4px 0;">Least-practiced focus areas: <b>${escHtml(weak.leastWorked.join(', '))}</b>.</p>` : ''}
     </div>` : ''}
   </div>`;
@@ -2772,7 +2905,7 @@ function renderAsk(){
   const d = App.ui.askDraft;
   const step = App.ui.askStep === 2 ? 2 : 1;
   const weak = getWeakPointProfile();
-  const weakOptionLabel = weak.categoryRank ? `Weakest area: ${weak.categoryRank[0][0]}` : null;
+  const weakOptionLabel = weak.categoryRank ? `Weakest area: ${AREA_LABEL[weak.categoryRank[0][0]].toLowerCase()}` : null;
   const feelingLabel = FEELING_SCALE.find(f => f.v === d.feeling).l;
 
   if (step === 1) {
@@ -3149,22 +3282,36 @@ function renderEntriesAndCheckins(){
       </div>` : ''}
     </div>`).join('') || '<p class="small muted">No entries yet.</p>';
 
-  const catLabels = {mental:'Mental', technique:'Technique', physical:'Physical'};
+  const legacyLabels = {mental:'Mental', technique:'Technique', physical:'Physical'};
   const assessRows = App.assessments.slice().reverse().map(a => {
-    const ranked = Object.entries(a.scores).sort((x,y)=>x[1]-y[1]);
     const expanded = App.ui.expandedAssessment === a.id;
-    const scoreRows = ranked.map(([cat,score]) => `<div class="bar-row"><div class="bar-label">${catLabels[cat]||cat}</div>
+    if (a.version === 2) {
+      const ranked = Object.entries(a.areas).sort((x,y)=>x[1]-y[1]);
+      const rows = ranked.map(([k,v]) => `<div class="bar-row"><div class="bar-label">${AREA_LABEL[k]}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${v/5*100}%"></div></div><div class="bar-val">${v.toFixed(1)}</div></div>`).join('');
+      return `<div class="entry">
+        <button class="entry-head" onclick="toggleAssessment('${a.id}')">
+          <span><b>${a.date}</b> &nbsp;<span class="muted">profile check-in</span></span><span>${expanded?'▲':'▼'}</span>
+        </button>
+        <div class="entry-body">
+          <p class="small muted">Lagging most: ${AREA_LABEL[ranked[0][0]]} &middot; Strongest: ${AREA_LABEL[ranked[ranked.length-1][0]]}</p>
+          ${expanded ? `<div class="barlist" style="margin-top:8px;">${rows}</div>
+            <p class="small muted" style="margin-top:8px;">Relative scores: they compare your areas to each other, not to anyone else.</p>` : ''}
+        </div></div>`;
+    }
+    const ranked = Object.entries(a.scores).sort((x,y)=>x[1]-y[1]);
+    const scoreRows = ranked.map(([cat,score]) => `<div class="bar-row"><div class="bar-label">${legacyLabels[cat]||cat}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${score/5*100}%"></div></div>
       <div class="bar-val">${score.toFixed(1)}</div></div>`).join('');
     const weakPoints = (a.answers||[]).map((score,i) => ({score, q: QUESTIONS[i]}))
       .filter(x => x.q && x.score <= 2).sort((x,y)=>x.score-y.score).slice(0,5);
     return `<div class="entry">
       <button class="entry-head" onclick="toggleAssessment('${a.id}')">
-        <span><b>${a.date}</b> &nbsp;<span class="muted">indoor: ${a.gradeIndoor||'—'} &middot; outdoor: ${a.gradeOutdoor||'—'}</span></span>
+        <span><b>${a.date}</b> &nbsp;<span class="muted">earlier format &middot; indoor: ${a.gradeIndoor||'—'} &middot; outdoor: ${a.gradeOutdoor||'—'}</span></span>
         <span>${expanded?'▲':'▼'}</span>
       </button>
       <div class="entry-body">
-        <p class="small muted">Weakest: ${catLabels[ranked[0][0]]||ranked[0][0]} (${ranked[0][1].toFixed(1)}) &middot; Strongest: ${catLabels[ranked[2][0]]||ranked[2][0]} (${ranked[2][1].toFixed(1)})</p>
+        <p class="small muted">Weakest: ${legacyLabels[ranked[0][0]]||ranked[0][0]} (${ranked[0][1].toFixed(1)}) &middot; Strongest: ${legacyLabels[ranked[2][0]]||ranked[2][0]} (${ranked[2][1].toFixed(1)})</p>
         ${expanded ? `
         <div class="barlist" style="margin-top:8px;">${scoreRows}</div>
         ${weakPoints.length ? `<p class="small muted" style="margin-top:10px;margin-bottom:4px;">Specific points that scored low:</p>
@@ -3191,6 +3338,16 @@ function settingsSection(id, title, body, info){
   </div>`;
 }
 function toggleSettingsSection(id){ App.ui.settingsSections[id] = !App.ui.settingsSections[id]; App.render(); }
+function renderBenchmarkHistory(){
+  if (!App.benchmarks.length) return '<p class="small muted">No benchmarks yet. Run them from the button above, or when a taper week prompts you.</p>';
+  return BENCHMARKS.map(b => {
+    const list = App.benchmarks.filter(x => x.test === b.key).sort((a,c) => c.date.localeCompare(a.date));
+    if (!list.length) return '';
+    return `<div style="padding:8px 0;border-top:1px solid var(--border);">
+      <div style="font-weight:600;font-size:0.85rem;">${escHtml(b.label)}</div>
+      <div class="small muted">${list.slice(0, 6).map(x => `${x.value} ${b.unit} (${escHtml(x.date.slice(5))})`).join(' &middot; ')}</div></div>`;
+  }).join('');
+}
 function renderSettings(){
   const s = App.settings;
   return `
@@ -3214,9 +3371,10 @@ function renderSettings(){
         <input type="text" placeholder="e.g. 5.10a" value="${escHtml(s.gradeOutdoor)}" oninput="App.settings.gradeOutdoor=this.value">
       </div>
     </div>
-    ${canQuickCheckin() ? `<button class="btn btn-secondary" style="margin-bottom:8px;" onclick="openQuestionnaire(true)">Quick check-in (6 questions)</button>` : ''}
-    <button class="btn btn-${canQuickCheckin() ? 'ghost' : 'secondary'}" onclick="openQuestionnaire()">Full weak-point check-in (24 questions)</button>
+    <button class="btn btn-secondary" style="margin-bottom:8px;" onclick="openQuestionnaire()">Profile check-in (6 questions)</button>
+    <button class="btn btn-ghost" onclick="openBenchmarks()">Run benchmark tests</button>
   </div>
+  ${settingsSection('benchmarks', 'Benchmark results', renderBenchmarkHistory(), 'Occasional objective tests. They are offered in taper weeks and can be run any time from the button above.')}
   ${settingsSection('goals', 'Weekly goals', `<div class="row2">
       ${RADAR_AXES.map(a => `<div class="field"><label>${escHtml(a.label)} (min)</label>
         <input type="number" inputmode="numeric" min="0" step="5" value="${getWeeklyTargets(false)[a.key]}"
@@ -3261,24 +3419,62 @@ function renderSettings(){
 }
 
 function renderQuestionnaire(){
-  const subset = App.ui.qSubset;
-  const idx = subset || QUESTIONS.map((q,i) => i);
-  const answered = idx.filter(i => App.ui.qDraft[i] !== undefined).length;
-  const items = idx.map((i, n) => { const q = QUESTIONS[i]; return `
-    <div class="q-item">
-      <div class="q-text">${n+1}. ${q.t}</div>
-      <div class="scale-row">${[0,1,2,3,4,5].map(v => `<button type="button" class="scale-btn ${App.ui.qDraft[i]===v?'active':''}" onclick="setQAnswer(${i},${v})">${v}</button>`).join('')}</div>
-      <div class="scale-caption"><span>Almost always</span><span>Never</span></div>
-    </div>`; }).join('');
+  const pairs = App.ui.qPairs || [];
+  const i = Math.min(App.ui.qPicks.length, pairs.length - 1);
+  const p = pairs[i];
+  if (!p) return '';
+  const dots = pairs.map((_, n) => `<span class="q-dot${n < i ? ' done' : n === i ? ' now' : ''}"></span>`).join('');
   return `
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;">
-      <h2>${subset ? 'Quick check-in' : 'Weak-point check-in'}</h2>
+      <h2>Profile check-in</h2>
       <button class="close-x" onclick="closeQuestionnaire()">&times;</button>
     </div>
-    <p class="small muted">${answered}/${idx.length} answered. ${infoIcon('0 = almost always happens, 5 = never happens. Answer honestly, not aspirationally.' + (subset ? ' A quick check-in asks a rotating 6 of the 24 questions and updates your scores from them.' : ''))}</p>
-    ${items}
-    <button class="btn btn-primary" onclick="submitAssessment()" ${answered<idx.length?'disabled':''}>Submit (${answered}/${idx.length})</button>
+    <p class="small muted" style="margin:0 0 10px;">Question ${i + 1} of ${pairs.length}. Tap the one that holds you back more often. ${infoIcon("Each question sets two things against each other, so the result shows which of strength, mobility, coordination and awareness is lagging relative to your others. It is not a grade.")}</p>
+    <div class="q-dots">${dots}</div>
+    <button type="button" class="choice-btn" onclick="answerPair('a')">${escHtml(p.ta)}</button>
+    <div class="small muted" style="text-align:center;margin:8px 0;">or</div>
+    <button type="button" class="choice-btn" onclick="answerPair('b')">${escHtml(p.tb)}</button>
+    <button type="button" class="btn btn-ghost" style="margin-top:12px;" onclick="answerPair('equal')">About equal</button>
+    <button type="button" class="btn btn-ghost" style="margin-top:8px;border-color:transparent;" onclick="backPair()">${App.ui.qPicks.length ? 'Back' : 'Cancel'}</button>
+  </div>`;
+}
+
+// One test at a time: what it is, how to do it, your last result, a number, next.
+function renderBenchmarkFlow(){
+  const i = App.ui.benchIndex;
+  if (i >= BENCHMARKS.length) {
+    const rows = BENCHMARKS.map(b => {
+      const v = App.ui.benchDraft[b.key];
+      if (!(v > 0)) return '';
+      const prev = lastBenchmark(b.key, true);
+      const delta = prev ? v - prev.value : null;
+      return `<div class="bar-row" style="align-items:baseline;"><div class="bar-label" style="width:auto;flex:1;color:var(--text);">${escHtml(b.label)}</div>
+        <div class="bar-val" style="width:auto;"><b>${v}</b> ${b.unit}${delta === null ? '' : ` <span class="small muted">(${delta > 0 ? '+' : ''}${delta})</span>`}</div></div>`;
+    }).join('');
+    return `<div class="card"><h2>Benchmarks saved</h2>
+      ${rows || '<p class="small muted">Nothing was entered.</p>'}
+      <button class="btn btn-primary" style="margin-top:12px;" onclick="closeBenchmarks()">Done</button></div>`;
+  }
+  const b = BENCHMARKS[i], last = lastBenchmark(b.key);
+  const cur = App.ui.benchDraft[b.key];
+  return `
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h2>Benchmark ${i + 1} of ${BENCHMARKS.length}</h2>
+      <button class="close-x" onclick="closeBenchmarks()">&times;</button>
+    </div>
+    <div class="q-dots">${BENCHMARKS.map((_, n) => `<span class="q-dot${n < i ? ' done' : n === i ? ' now' : ''}"></span>`).join('')}</div>
+    <div style="font-family:'Big Shoulders Display',sans-serif;font-weight:700;font-size:1.2rem;margin-top:4px;">${escHtml(b.label)}</div>
+    <p class="small muted" style="margin:2px 0 10px;text-transform:capitalize;">${escHtml(b.area === 'antagonist' ? 'antagonist / stabilizer' : AREA_LABEL[b.area])}</p>
+    <p class="small" style="margin:0 0 12px;">${escHtml(b.how)}</p>
+    ${last ? `<p class="small muted" style="margin:0 0 8px;">Last time: <b>${last.value}</b> ${b.unit} on ${escHtml(last.date)}</p>` : ''}
+    <div class="field"><label>Your result (${b.unit})</label>
+      <input type="number" inputmode="numeric" min="0" id="benchInput" value="${cur > 0 ? cur : ''}" placeholder="0"
+        oninput="App.ui.benchDraft['${b.key}'] = Number(this.value) || 0">
+    </div>
+    <button class="btn btn-primary" onclick="benchNext(false)">${i === BENCHMARKS.length - 1 ? 'Save and finish' : 'Save and next'}</button>
+    <button class="btn btn-ghost" style="margin-top:8px;" onclick="benchNext(true)">Skip this one</button>
   </div>`;
 }
 
@@ -3347,7 +3543,7 @@ function removeClimbRow(i){ App.ui.climbsDraft.splice(i,1); App.render(); }
 function exportData(){
   const safeSettings = Object.assign({}, App.settings);
   delete safeSettings.apiKey;
-  const payload = { exportedAt: new Date().toISOString(), settings: safeSettings, entries: App.entries, assessments: App.assessments };
+  const payload = { exportedAt: new Date().toISOString(), settings: safeSettings, entries: App.entries, assessments: App.assessments, benchmarks: App.benchmarks };
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -3369,7 +3565,9 @@ function importData(file){
       const existingAssessIds = new Set(App.assessments.map(a=>a.id));
       const newAssessments = (data.assessments||[]).filter(a => !existingAssessIds.has(a.id));
       App.assessments = App.assessments.concat(newAssessments).sort((a,b)=> a.date.localeCompare(b.date));
-      App.saveEntries(); App.saveAssessments();
+      const existingBenchIds = new Set(App.benchmarks.map(b=>b.id));
+      App.benchmarks = App.benchmarks.concat((data.benchmarks||[]).filter(b => b && b.id && !existingBenchIds.has(b.id))).sort((a,b)=> a.date.localeCompare(b.date));
+      App.saveEntries(); App.saveAssessments(); App.saveBenchmarks();
       App.toast(`Imported ${newEntries.length} entries, ${newAssessments.length} check-ins`);
       App.render();
     } catch(e) {
@@ -3493,44 +3691,76 @@ function resetWeeklyGoals(){
 }
 function saveSettingsForm(){ App.saveSettings(); App.toast('Settings saved'); App.render(); }
 
-// A quick check-in asks 6 of the 24 questions (two per category) and rotates through all of them over
-// four quick check-ins, so the profile keeps moving without the full 24 each time. The answers drop
-// into the previous full set of answers and every score is recomputed from all 24.
-const QUICK_CHECKIN_EVERY = 8; // climbing days since the last check-in
-function quickCheckinIndices(){
-  const k = App.assessments.filter(a => a.quick).length % 4;
-  return [0,1,2,3,4,5].map(m => k + 4 * m);
-}
-function canQuickCheckin(){
-  const latest = App.assessments[App.assessments.length - 1];
-  return !!(latest && Array.isArray(latest.answers) && latest.answers.length === QUESTIONS.length);
-}
-function openQuestionnaire(quick){
-  App.ui.qOpen = true; App.ui.qDraft = {};
-  App.ui.qSubset = (quick === true && canQuickCheckin()) ? quickCheckinIndices() : null;
+// Profile check-in: six comparisons, one per pair of areas. Scores are relative (which area limits
+// you more), so they are only meaningful against each other.
+const PROFILE_EVERY = 8; // climbing days since the last check-in before it is offered again
+function openQuestionnaire(){
+  const round = App.assessments.filter(a => a.version === 2).length;
+  App.ui.qPairs = buildCheckinPairs(round);
+  App.ui.qPicks = [];
+  App.ui.benchOpen = false;
+  App.ui.qOpen = true;
   App.render(); window.scrollTo(0,0);
 }
-function closeQuestionnaire(){ App.ui.qOpen = false; App.ui.qSubset = null; App.render(); }
-function setQAnswer(i, v){ App.ui.qDraft[i] = v; App.render(); }
-
-function submitAssessment(){
-  const subset = App.ui.qSubset;
-  let answers;
-  if (subset && canQuickCheckin()) {
-    answers = App.assessments[App.assessments.length - 1].answers.slice();
-    subset.forEach(i => { answers[i] = App.ui.qDraft[i]; });
-  } else {
-    answers = QUESTIONS.map((q,i)=> App.ui.qDraft[i]);
-  }
-  const totals = { mental:[], technique:[], physical:[] };
-  QUESTIONS.forEach((q,i)=> totals[q.cat].push(answers[i]));
-  const scores = {};
-  Object.keys(totals).forEach(cat => { scores[cat] = totals[cat].reduce((a,b)=>a+b,0) / totals[cat].length; });
-  App.assessments.push({ id: uid(), date: todayISO(), gradeIndoor: App.settings.gradeIndoor, gradeOutdoor: App.settings.gradeOutdoor, answers, scores, quick: !!(subset && canQuickCheckin()) || undefined });
+function answerPair(choice){
+  App.ui.qPicks.push(choice);
+  if (App.ui.qPicks.length >= App.ui.qPairs.length) { finishProfileCheckin(); return; }
+  App.render();
+}
+function backPair(){
+  if (App.ui.qPicks.length) { App.ui.qPicks.pop(); App.render(); }
+  else closeQuestionnaire();
+}
+function closeQuestionnaire(){ App.ui.qOpen = false; App.ui.qPairs = null; App.ui.qPicks = []; App.render(); }
+function finishProfileCheckin(){
+  const pairs = App.ui.qPairs, picks = App.ui.qPicks;
+  const points = { strength:0, mobility:0, coordination:0, awareness:0 }, seen = { strength:0, mobility:0, coordination:0, awareness:0 };
+  pairs.forEach((p, i) => {
+    seen[p.a]++; seen[p.b]++;
+    if (picks[i] === 'a') points[p.a] += 1;
+    else if (picks[i] === 'b') points[p.b] += 1;
+    else { points[p.a] += 0.5; points[p.b] += 0.5; }
+  });
+  const areas = {};
+  AREAS.forEach(({key}) => { areas[key] = Math.round(5 * (1 - points[key] / (seen[key] || 1)) * 100) / 100; });
+  App.assessments.push({ id: uid(), date: todayISO(), version: 2, areas, points, picksCount: seen.strength,
+    picks: pairs.map((p, i) => ({ a: p.a, b: p.b, choice: picks[i] })),
+    gradeIndoor: App.settings.gradeIndoor, gradeOutdoor: App.settings.gradeOutdoor });
   App.saveAssessments();
-  App.ui.qOpen = false; App.ui.qSubset = null;
-  App.toast(subset ? 'Quick check-in saved' : 'Check-in saved');
+  App.ui.qOpen = false; App.ui.qPairs = null; App.ui.qPicks = [];
+  App.toast('Profile updated');
   App.setTab('home');
+}
+
+// Benchmarks: occasional objective checks, offered in taper weeks and runnable from Settings.
+function lastBenchmark(key, beforeThisSession){
+  const list = App.benchmarks.filter(b => b.test === key).sort((a,b) => a.date.localeCompare(b.date) || (a.id < b.id ? -1 : 1));
+  if (!beforeThisSession) return list.length ? list[list.length - 1] : null;
+  // the most recent result that isn't from today's run (used for the change shown on the summary)
+  const today = todayISO();
+  const older = list.filter(b => b.date < today);
+  return older.length ? older[older.length - 1] : null;
+}
+function openBenchmarks(){
+  App.ui.benchOpen = true; App.ui.benchIndex = 0; App.ui.benchDraft = {};
+  App.ui.qOpen = false; App.ui.settingsOpen = false;
+  App.render(); window.scrollTo(0,0);
+}
+function closeBenchmarks(){ App.ui.benchOpen = false; App.ui.benchIndex = 0; App.ui.benchDraft = {}; App.render(); }
+function benchNext(skip){
+  const b = BENCHMARKS[App.ui.benchIndex];
+  if (skip) delete App.ui.benchDraft[b.key];
+  App.ui.benchIndex++;
+  if (App.ui.benchIndex >= BENCHMARKS.length) {
+    // commit everything entered in this run with one date
+    const date = todayISO();
+    BENCHMARKS.forEach(t => {
+      const v = App.ui.benchDraft[t.key];
+      if (v > 0) App.benchmarks.push({ id: uid(), date, test: t.key, value: v });
+    });
+    App.saveBenchmarks();
+  }
+  App.render(); window.scrollTo(0,0);
 }
 
 // ---- Init ----
@@ -3563,7 +3793,7 @@ document.addEventListener('visibilitychange', () => {
   }, {passive:true});
   panels.addEventListener('touchend', (e) => {
     if (startX === null) return;
-    if (App.ui.qOpen || App.ui.settingsOpen) return;
+    if (App.ui.qOpen || App.ui.benchOpen || App.ui.settingsOpen) return;
     const touch = e.changedTouches[0];
     const dx = touch.clientX - startX, dy = touch.clientY - startY;
     const dt = Date.now() - startTime;
@@ -3621,8 +3851,9 @@ window.setFontSize = setFontSize; window.adjustLogTime = adjustLogTime; window.s
 window.adjustAskMinutes = adjustAskMinutes; window.setAskMinutes = setAskMinutes; window.typeAskMinutes = typeAskMinutes; window.removeLogTimeField = removeLogTimeField; window.addLogTimeField = addLogTimeField; window.setWeeklyGoal = setWeeklyGoal; window.resetWeeklyGoals = resetWeeklyGoals;
 window.setTheme = setTheme;
 window.openSettings = openSettings; window.closeSettings = closeSettings;
-window.openQuestionnaire = openQuestionnaire; window.quickCheckinIndices = quickCheckinIndices; window.canQuickCheckin = canQuickCheckin; window.closeQuestionnaire = closeQuestionnaire;
-window.setQAnswer = setQAnswer; window.submitAssessment = submitAssessment; window.askClaude = askClaude;
+window.openQuestionnaire = openQuestionnaire; window.answerPair = answerPair; window.backPair = backPair; window.closeQuestionnaire = closeQuestionnaire;
+window.openBenchmarks = openBenchmarks; window.closeBenchmarks = closeBenchmarks; window.benchNext = benchNext; window.BENCHMARKS = BENCHMARKS;
+window.askClaude = askClaude;
 window.applyPhaseOverride = applyPhaseOverride; window.exportData = exportData; window.importData = importData;
 window.clearPainFlag = clearPainFlag; window.editEntry = editEntry; window.cancelEdit = cancelEdit;
 window.toggleLogWorkoutStyle = toggleLogWorkoutStyle; window.toggleLogExercise = toggleLogExercise;
