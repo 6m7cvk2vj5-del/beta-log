@@ -47,21 +47,21 @@
     answers: [3,2,3,3,2,3,3,2,4,3,3,3,3,2,4,3,3,3,3,2,3,3,2,4], gradeIndoor: '5.10b', gradeOutdoor: '5.10a' }];
 
   var plan = [
-    '### Warmup — 10 min',
+    '### Warmup — 10 min [mobility]',
     '- Jumping jacks, 30 sec',
     '- Joint circles (ankles/hips/shoulders), 10 each direction',
     '- World\'s greatest stretch, 5 each side',
-    '### Finger health — 5 min',
+    '### Finger health — 5 min [fingers]',
     '- Finger extensions (rubber band), 2 x 15',
     '- Wrist curls (health/prehab), 2 x 12',
-    '### Easy climbing — 10 min',
+    '### Easy climbing — 10 min [climb]',
     '- Traverse a green problem, 4 laps',
-    '### Volume — 30 min',
+    '### Volume — 30 min [climb]',
     '- Boulder problems two grades below your max, 8 problems with 90 sec rest',
-    '### Core — 10 min',
+    '### Core — 10 min [core]',
     '- Side plank hold, 30 sec/side',
     '- Hanging leg raises, 3 x 8',
-    '### Cooldown — 5 min',
+    '### Cooldown — 5 min [flexibility]',
     '- Pigeon pose, 30 sec/side',
     '- Thread-the-needle, 30 sec/side'
   ].join('\n');

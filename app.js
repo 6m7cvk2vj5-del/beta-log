@@ -828,7 +828,7 @@ function clearPainFlag(){
 // where that's not supported (most desktop browsers), fall back to copying to the clipboard.
 async function sharePlan(){
   if (!App.ui.planText) return;
-  const text = `Beta Log — ${todayISO()}\n\n${App.ui.planText}`;
+  const text = `Beta Log — ${todayISO()}\n\n${stripPlanTags(App.ui.planText)}`;
   if (navigator.share) {
     try { await navigator.share({ title: 'Beta Log plan', text }); return; }
     catch (e) { if (e && e.name === 'AbortError') return; /* user cancelled the share sheet */ }
@@ -842,7 +842,7 @@ async function sharePlan(){
 }
 function openPlanAsPage(){
   if (!App.ui.planText) return;
-  const body = linkifyPlanToHTML(App.ui.planText);
+  const body = linkifyPlanToHTML(stripPlanTags(App.ui.planText));
   const c = themeColors();
   const doc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Beta Log — ${todayISO()}</title>
@@ -873,7 +873,7 @@ function savePlanAsImage(){
   // wrap text to fit width
   const maxCharsPerLine = Math.floor((width - padding*2) / (fontSize*0.6));
   const lines = [];
-  App.ui.planText.split('\n').forEach(paragraph => {
+  stripPlanTags(App.ui.planText).split('\n').forEach(paragraph => {
     if (paragraph.length === 0) { lines.push(''); return; }
     let line = '';
     paragraph.split(' ').forEach(word => {
@@ -980,24 +980,62 @@ async function extractWorkoutData(text){
   return { fresh, climbsDraft };
 }
 
-// "Add this to today's log" — runs the plan text through the same extraction as a file import,
-// then opens the Log tab pre-filled so it can be glanced over and saved. One tap, no questions:
-// how closely the plan was followed is an optional pill on the Log screen instead of a gate here.
+// Builds the Log draft straight from a plan's tagged section headers: each section's minutes go to
+// the bucket its tag names, so nothing is estimated and no API call is needed. Returns null when any
+// section with exercises lacks a tag or a minutes figure (older plans, or the model slipped), and the
+// caller falls back to reading the plan with the extraction call instead.
+function planToLogDraft(text){
+  const secs = parsePlanSections(text).filter(sec => sec.items.length);
+  if (!secs.length) return null;
+  if (secs.some(sec => !sec.bucket || !sec.minutes)) return null;
+  const fresh = freshLogDraft();
+  const byBucket = {};
+  secs.forEach(sec => { byBucket[sec.bucket] = (byBucket[sec.bucket] || 0) + sec.minutes; });
+  Object.keys(byBucket).forEach(k => { fresh[BUCKET_TO_TIME_FIELD[k]] = byBucket[k]; });
+  const primary = Object.keys(byBucket).sort((a, b) => byBucket[b] - byBucket[a])[0];
+  fresh.type = RADAR_KEY_TO_SESSION_TYPE[primary] || 'Strength';
+  fresh.duration = TIME_FIELDS.reduce((sum, f) => sum + (Number(fresh[f]) || 0), 0);
+  // Named exercises that match your own library by name, so they come across as tapped-in exercises.
+  const lib = {};
+  Object.keys(EXERCISE_LIBRARY).forEach(style => EXERCISE_LIBRARY[style].forEach(n => { if (!lib[n.toLowerCase()]) lib[n.toLowerCase()] = style; }));
+  const styles = new Set();
+  secs.forEach(sec => sec.items.forEach(it => {
+    const style = lib[it.name.toLowerCase()];
+    if (style) { if (!fresh.exercisesDone.includes(it.name)) fresh.exercisesDone.push(it.name); styles.add(style); }
+  }));
+  fresh.workoutStyles = [...styles];
+  // What was asked for today is known, so climbing context needn't be re-entered.
+  const ask = App.ui.askDraft;
+  if (byBucket.climb) {
+    if (ask.climbDiscipline === 'Bouldering') fresh.dayTypes.push('Bouldering');
+    if (ask.climbDiscipline === 'Rope') fresh.dayTypes.push('Sport/Rope');
+    if (ask.climbLocation) fresh.dayTypes.push(ask.climbLocation);
+  }
+  fresh.plan = text;
+  return { fresh, climbsDraft: [] };
+}
+function openLogWithDraft(fresh, climbsDraft){
+  App.ui.logDraft = fresh;
+  App.ui.climbsDraft = climbsDraft;
+  // Surface every bucket that has minutes, same as editing an existing entry — otherwise a second
+  // bucket (e.g. antagonist alongside core) is saved but hidden on the form.
+  const primary = primaryTimeFieldForType(fresh.type);
+  App.ui.logExtraFields = TIME_FIELDS.filter(f => f !== primary && Number(fresh[f]) > 0);
+  App.ui.editingId = null;
+  App.ui.importLoading = false; // clear before switching tabs, or the new tab renders stuck "loading"
+  App.toast('Pre-filled from the plan — check and save');
+  App.setTab('log');
+}
+// "Add this to today's log" opens the Log tab pre-filled so it can be glanced over and saved. One
+// tap, no questions: how closely the plan was followed is an optional pill on the Log screen.
 async function saveGeneratedPlanToLog(){
+  const direct = planToLogDraft(App.ui.planText);
+  if (direct) { openLogWithDraft(direct.fresh, direct.climbsDraft); return; }
   App.ui.importLoading = true; App.ui.importError = ''; App.render();
   try {
     const { fresh, climbsDraft } = await extractWorkoutData(App.ui.planText);
     fresh.plan = App.ui.planText;
-    App.ui.logDraft = fresh;
-    App.ui.climbsDraft = climbsDraft;
-    // Surface every bucket the extraction put minutes in, same as editing an existing entry —
-    // otherwise a second bucket (e.g. antagonist alongside core) is saved but hidden on the form.
-    const primary = primaryTimeFieldForType(fresh.type);
-    App.ui.logExtraFields = TIME_FIELDS.filter(f => f !== primary && Number(fresh[f]) > 0);
-    App.ui.editingId = null;
-    App.ui.importLoading = false; // clear before switching tabs, or the new tab renders stuck "loading"
-    App.toast('Pre-filled from the plan — check and save');
-    App.setTab('log');
+    openLogWithDraft(fresh, climbsDraft);
   } catch(e) {
     App.ui.importError = 'Could not process the plan: ' + e.message;
     App.ui.importLoading = false;
@@ -1039,6 +1077,8 @@ async function askClaude(feedback){
     sys = "You are an experienced rock climbing training coach. You're given a workout plan and a requested " +
       "adjustment. Return the full adjusted plan in the same format: section headers (e.g. '### Warmup — 10 min') " +
       "with short bullet lists of specific, individually-recognizable named exercises and rough sets/reps/durations. " +
+      "Keep any trailing time-bucket tag on a header (e.g. '[core]') and give every header a minutes figure and a " +
+      "tag from: climb, fingers, strength, antag, core, flexibility, mobility, cardio. " +
       "No fluff, no disclaimers. Change only what the adjustment implies.";
     messages = [{ role:'user', content: `Current plan:\n\n${App.ui.planText}\n\nAdjust it: ${feedback}` }];
     App.ui.lastPlanContext = { sys, userMsg: messages[0].content.split('\n\nAdjust it:')[0] };
@@ -1184,6 +1224,13 @@ async function askClaude(feedback){
       "Max Strength & Power'), since that context should visibly shape the prescription. The HIT System (max-strength " +
       "hangboard protocol) is a legitimate option to recommend here when it fits the phase and their level — feel free " +
       "to suggest it, not just repeaters.\n\n" +
+      "SECTION HEADER FORMAT, applies to every plan: write each section header exactly like " +
+      "'### Warmup — 10 min [mobility]'. The last item is a time-bucket tag in square brackets, one of: climb, " +
+      "fingers, strength, antag, core, flexibility, mobility, cardio. It says which kind of training those minutes " +
+      "count as when the workout is logged: general warmup movement prep is mobility (or cardio if it is mostly " +
+      "jumping or jogging), on-wall warmup and all climbing is climb, finger/wrist/forearm health is fingers, " +
+      "antagonist/shoulder/stabilizer work is antag, static stretching and yoga is flexibility. Every section gets " +
+      "a minutes figure and a tag, and the section minutes should add up to the time budget.\n\n" +
       "FORMAT REQUIREMENT, applies to every workout type: every list item must name a specific, real, " +
       "individually-recognizable exercise or stretch someone could look up and do — e.g. 'Side plank hold' or " +
       "'Reverse crunches', never a category label standing in for one. The muscle group, power level, core region, " +
@@ -1342,7 +1389,7 @@ function renderStreamingTail(text){
     const cls = classifyPlanLineRaw(line);
     if (cls === 'header') {
       const clean = line.replace(/^\s*(?:#{1,6}|\d+[.)]|[-*•])\s+/, '').replace(/\*\*/g, '').trim();
-      return clean ? `<div class="plan-section-title" style="margin:10px 0 4px;">${escHtml(clean)}</div>` : '';
+      return clean ? `<div class="plan-section-title" style="margin:10px 0 4px;">${escHtml(splitHeaderTag(clean).text)}</div>` : '';
     }
     if (cls === 'exercise') {
       const clean = line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').replace(/\*\*/g, '');
@@ -1419,7 +1466,7 @@ function parsePlanLines(text){
 }
 // In-app version: exercise name is a tappable span that calls searchExercise() via the app's own JS.
 function renderPlanWithSearchLinks(text){
-  return parsePlanLines(text).map(l => l.name === null
+  return parsePlanLines(stripPlanTags(text)).map(l => l.name === null
     ? escHtml(l.rest)
     : escHtml(l.prefix) + `<span class="ex-link" onclick="searchExercise('${escAttr(l.name)}')">${escHtml(l.name)}</span>` + escHtml(l.rest)
   ).join('\n');
@@ -1544,26 +1591,43 @@ function renderPlanHero(text, sessionTypes, minutes){
   </div>`;
 }
 // Keyword-based section categorization, used to color-code exercise cards and section headers.
+// The category names match the time buckets (climb, fingers, antag, ...) so a section's color,
+// its swap pool and the minutes it logs under all agree.
 function categorizeHeader(headerText){
   const t = headerText.toLowerCase();
   if (/warm.?up|cool.?down/.test(t)) return 'warmup';
   if (/climb|boulder|route|drill/.test(t)) return 'climb';
   if (/\bcore\b/.test(t)) return 'core';
-  if (/strength|power|antagonist|finger|forearm|wrist/.test(t)) return 'strength';
-  if (/mobility|flexibility|stretch|cardio|fascia|roll/.test(t)) return 'mobility';
+  if (/finger|forearm|wrist|hangboard/.test(t)) return 'fingers';
+  if (/antagonist|stabiliz|prehab/.test(t)) return 'antag';
+  if (/strength|power/.test(t)) return 'strength';
+  if (/flexib|stretch|yoga/.test(t)) return 'flexibility';
+  if (/mobility|fascia|roll/.test(t)) return 'mobility';
+  if (/cardio/.test(t)) return 'cardio';
   if (/mental/.test(t)) return 'mental';
   return 'default';
 }
+// The model's own time-bucket tag ("### Core — 10 min [core]") decides the category when the
+// header's wording alone doesn't.
+function categorizeSection(title, bucket){
+  const kw = categorizeHeader(title);
+  return (kw === 'default' && bucket) ? bucket : kw;
+}
 // Which named-exercise banks make sense to pull a replacement from for each category. Climbing and
-// mental cues deliberately have no pool — there's no library of bodyweight-style items that would
-// make sense to swap a climbing problem or a mental-game line for.
+// mental cues deliberately have no pool, and neither does the finger/forearm health block: that
+// bank mixes max-strength hangs in with the health work, so a random swap could trade a light
+// extension for a hard hang. It gets a properly tagged pool with the exercise-library rework.
 const CATEGORY_EXERCISE_POOLS = {
   warmup: ['Body Prep','Static Stretch','Functional Movement'],
   core: ['Core Circuit','TRX — Core'],
-  strength: ['Upper Tabata','Full Efficient Workout','Leg Day','Fingers'],
-  mobility: ['Yoga Poses','Static Stretch','Foam Rolling','Lacrosse Ball Release','Functional Movement'],
+  strength: ['Upper Tabata','Full Efficient Workout','Leg Day'],
+  antag: ['TRX — Shoulder','Upper Tabata'],
+  flexibility: ['Yoga Poses','Static Stretch'],
+  mobility: ['Foam Rolling','Lacrosse Ball Release','Functional Movement','Body Prep'],
+  cardio: ['Cardio Circuit'],
   default: ['General/Other'],
 };
+const NO_SWAP_CATEGORIES = ['climb','mental','fingers'];
 // A locally-swapped exercise needs its own sensible default detail — reusing the exercise it's
 // replacing would leave a stale, potentially nonsensical prescription attached (e.g. a rep-based
 // movement keeping a hold-style "30 sec/side" left over from whatever it replaced). The swap pool
@@ -1608,6 +1672,57 @@ function swapPlanLine(index, category){
   App.ui.planText = lines.join('\n');
   App.render();
 }
+// Time-bucket tags the plan prompt asks for on every section header ("### Core — 10 min [core]").
+// They never show in the UI or exports; they exist so logging can move minutes across exactly.
+const PLAN_BUCKETS = ['climb','fingers','strength','antag','core','flexibility','mobility','cardio'];
+const BUCKET_TO_TIME_FIELD = { climb:'timeClimb', fingers:'timeFingers', strength:'timeStrength', antag:'timeAntag',
+  core:'timeCore', flexibility:'timeFlexibility', mobility:'timeMobility', cardio:'timeCardio' };
+const PLAN_TAG_RE = new RegExp('\\s*\\[(' + PLAN_BUCKETS.join('|') + ')\\](?=\\s*(?:\\*\\*)?\\s*$)', 'i');
+function splitHeaderTag(clean){
+  const m = clean.match(/^(.*?)\s*\[([a-z]+)\]\s*$/i);
+  if (m && PLAN_BUCKETS.includes(m[2].toLowerCase())) return { text: m[1].trim(), bucket: m[2].toLowerCase() };
+  return { text: clean, bucket: null };
+}
+// Plan text as a person should see it: section tags removed. Used by every export and by display.
+function stripPlanTags(text){
+  return (text || '').split('\n').map(l => classifyPlanLineRaw(l) === 'header' ? l.replace(PLAN_TAG_RE, '') : l).join('\n');
+}
+function badgeMinutes(badge){
+  const m = (badge || '').match(/^(\d+)\s*(min|minutes|sec|seconds)/i);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  return /^sec/i.test(m[2]) ? Math.max(1, Math.round(n / 60)) : n;
+}
+function parseExerciseLine(line){
+  const bulletMatch = line.match(/^(\s*(?:[-*•]|\d+[.)])\s+)(.*)$/);
+  if (!bulletMatch) return null;
+  const body = bulletMatch[2].replace(/\*\*(.*?)\*\*/g, '$1');
+  const sep = splitExerciseNameDetail(body);
+  const name = (sep ? sep[1] : body).trim();
+  const detail = sep ? (sep[2].replace(/^[:,]\s*|^ - /, '') + sep[3]).trim() : '';
+  return { name: name || body.trim(), detail };
+}
+// The plan as data: one entry per section header with its exercises and any prose lines.
+function parsePlanSections(text){
+  const lines = (text || '').split('\n');
+  const cls = classifyPlanLines(lines);
+  const sections = [];
+  let cur = null;
+  lines.forEach((line, i) => {
+    if (cls[i] === 'header') {
+      const clean = line.replace(/^\s*(?:#{1,6}|\d+[.)]|[-*•])\s+/, '').replace(/\*\*/g, '').trim();
+      const tagged = splitHeaderTag(clean);
+      const { title, badge } = parseHeaderParts(tagged.text);
+      cur = { title, badge, bucket: tagged.bucket, minutes: badgeMinutes(badge), items: [], plain: [] };
+      sections.push(cur);
+      return;
+    }
+    if (!cur) return;
+    if (cls[i] === 'exercise') { const ex = parseExerciseLine(line); if (ex) cur.items.push(ex); }
+    else if (cls[i] === 'other' && line.trim()) cur.plain.push(line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').replace(/\*\*/g, '').trim());
+  });
+  return sections;
+}
 // Pulls a trailing time mention ("— 10 min") off a header into its own badge chip.
 function parseHeaderParts(clean){
   const m = clean.match(/^(.*?)[\s—–-]+(\d+\s*(?:min|minutes|sec|seconds))\s*$/i);
@@ -1623,8 +1738,9 @@ function renderPlanEditable(text, interactive){
     const cls = allCls[i];
     if (cls === 'header') {
       const clean = line.replace(/^\s*(?:#{1,6}|\d+[.)]|[-*•])\s+/, '').replace(/\*\*/g, '').trim();
-      category = categorizeHeader(clean);
-      const { title, badge } = parseHeaderParts(clean);
+      const tagged = splitHeaderTag(clean);
+      const { title, badge } = parseHeaderParts(tagged.text);
+      category = categorizeSection(title, tagged.bucket);
       return `<div class="plan-section-header" style="border-left-color:var(--cat-${category})">
         <span class="plan-section-title">${escHtml(title)}</span>
         ${badge ? `<span class="plan-badge">${escHtml(badge)}</span>` : ''}
@@ -1660,13 +1776,33 @@ function renderPlanEditable(text, interactive){
         </div>
       </div>
       <div class="plan-line-controls">
-        ${(category !== 'climb' && category !== 'mental') ? `<button type="button" onclick="swapPlanLine(${i},'${category}')" title="Swap for a different exercise">&#8635;</button>` : ''}
+        ${!NO_SWAP_CATEGORIES.includes(category) ? `<button type="button" onclick="swapPlanLine(${i},'${category}')" title="Swap for a different exercise">&#8635;</button>` : ''}
         <button type="button" onclick="movePlanLine(${i},-1)" title="Move up">&uarr;</button>
         <button type="button" onclick="movePlanLine(${i},1)" title="Move down">&darr;</button>
         <button type="button" class="ex-remove" onclick="removePlanLine(${i})" title="Remove">&times;</button>
       </div>
     </div>`;
   }).join('');
+}
+// One swipeable card per section, then the full editable list below. Read-only here: the
+// controls (reorder, swap, remove) live on the full list so there is one place to edit.
+function renderSectionCarousel(text){
+  const secs = parsePlanSections(text).filter(sec => sec.items.length || sec.plain.length);
+  if (secs.length < 2) return '';
+  const cards = secs.map((sec, i) => {
+    const cat = categorizeSection(sec.title, sec.bucket);
+    return `<div class="section-card" style="border-top-color:var(--cat-${cat})">
+      <div class="section-card-count">${i + 1} of ${secs.length}</div>
+      <div class="section-card-title">${escHtml(sec.title)}${sec.badge ? ` <span class="plan-badge">${escHtml(sec.badge)}</span>` : ''}</div>
+      ${sec.plain.map(p => `<div class="plan-plain">${escHtml(p)}</div>`).join('')}
+      ${sec.items.map(it => `<div class="section-card-item">
+        <div class="exercise-card-name"><span class="ex-link" onclick="searchExercise('${escAttr(it.name)}')">${escHtml(it.name)}</span></div>
+        ${it.detail ? `<div class="exercise-card-detail">${escHtml(it.detail)}</div>` : ''}
+      </div>`).join('')}
+    </div>`;
+  }).join('');
+  return `<div class="section-carousel" aria-label="Workout sections">${cards}</div>
+    <p class="small muted" style="margin:2px 0 0;">Swipe through the sections, or scroll down for the whole workout.</p>`;
 }
 function toggleLogMore(){ App.ui.logMoreOpen = !App.ui.logMoreOpen; App.render(); }
 
@@ -2195,6 +2331,7 @@ function renderPlan(){
   <div class="card">
     ${renderPlanHero(App.ui.planText, d.sessionTypes, d.minutes)}
     ${renderTimerWidget()}
+    ${renderSectionCarousel(App.ui.planText)}
     <div class="plan-editable">${renderPlanEditable(App.ui.planText)}</div>
     <p class="small muted" style="margin-top:6px;">Tap a name to search it, use the arrows to reorder, &times; to drop it. ${infoIcon("Removing every exercise under a heading also removes the heading. All the export/share/save options below use whatever's currently shown here.")}</p>
     <div class="pillrow" style="margin-top:10px;">
@@ -2752,7 +2889,7 @@ document.addEventListener('visibilitychange', () => {
   panels.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) { startX = null; return; }
     const tag = e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.closest('input,textarea,select')) { startX = null; return; }
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.closest('input,textarea,select,.section-carousel')) { startX = null; return; }
     startX = e.touches[0].clientX;
     startY = e.touches[0].clientY;
     startTime = Date.now();

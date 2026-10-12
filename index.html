@@ -57,6 +57,14 @@
   .step-btn:active{background:var(--border);}
   .step-val{flex:1;display:flex;align-items:baseline;justify-content:center;gap:6px;}
   .step-val input{width:90px;text-align:center;font-size:1.3rem;font-weight:600;padding:8px 6px;}
+  .section-carousel{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;
+    margin:12px -2px 8px;padding:2px;align-items:flex-start;}
+  .section-card{flex:0 0 84%;min-width:0;scroll-snap-align:start;background:var(--surface);border:1px solid var(--border);
+    border-top:3px solid var(--cat-default);border-radius:10px;padding:12px;}
+  .section-card-count{font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;}
+  .section-card-title{font-family:'Big Shoulders Display',sans-serif;font-weight:700;font-size:1.1rem;margin:2px 0 6px;
+    display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .section-card-item{padding:8px 0;border-top:1px solid var(--border);}
   .pillrow{display:flex;flex-wrap:wrap;gap:6px;}
   .pill{background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:7px 13px;color:var(--text);font-size:0.85rem;cursor:pointer;font-family:inherit;}
   .pill.sm{padding:6px 11px;font-size:0.8rem;}
