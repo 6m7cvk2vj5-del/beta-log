@@ -68,7 +68,7 @@ const RADAR_KEY_TO_SESSION_TYPE = {
 // each named entry below doubles as a filter when picking exercises to log.
 const WORKOUT_STYLES = ['Core Circuit','Leg Day','Upper Tabata','TRX — Core','TRX — Shoulder','Full Efficient Workout',
   'Yoga Poses','Static Stretch','Foam Rolling','Lacrosse Ball Release','Functional Movement','Body Prep',
-  'Cardio Circuit','Fingers','General/Other'];
+  'Cardio Circuit','Fingers','Prehab','General/Other'];
 const EXERCISE_LIBRARY = {
   'Core Circuit': ["Hanging leg lift","Oblique weighted arm dip","Sit-up to stand-up","Wheelbarrow","Oblique knee raise plank","Farmer walk","A-frame drop","Plank (elevated)","Plank (sideways walk)","Side plank with leg raise","Full-body focus plank","Kettlebell figure 8","Matrix lean back"],
   'Leg Day': ["Squat/deadlift","Catcher calf raises","Calf jumps","High stepping","Weighted box jumps","Bulgarian lunges","Hanging knee lifts","Wall sits","Multidirectional lunges","Core-to-toe side lunges"],
@@ -84,8 +84,110 @@ const EXERCISE_LIBRARY = {
   'Body Prep': ["Joint circles (ankles/hips/shoulders)","Arm circles","Leg swings (front-back)","Leg swings (side-side)","Hip circles","Walking lunges with twist","High knees march","Band pull-aparts","Wall slides"],
   'Cardio Circuit': ["Jump rope","Rowing intervals","Stair sprints","Suicide sprints","Incline treadmill walk","Bike intervals","Burpees"],
   'Fingers': ["Finger hangs","Finger pull-ups","Finger planks","Hangboard repeaters","Minimum-edge hangs","Fingerboard moving hangs","HIT System (max-strength hangs)","Wrist curls (health/prehab)","Finger extensions (rubber band)"],
+  // Light, low-rep antagonist and stability work for warmups and cooldowns: 1x5 to 1x10, never taken near failure.
+  'Prehab': ["Band external rotation","Scapular push-ups","Prone Y raises","Prone T raises","Wall angels","Face pulls (band)",
+    "Reverse wrist curls","Wrist pronation-supination (light weight)","Radial-ulnar deviation (light weight)","Band wrist extensions",
+    "Eccentric wrist extensions (slow lower)","Band triceps extensions","Prone cobra","Clamshells","Banded lateral walks","Glute bridges",
+    "Fire hydrants","Bird dog","Dead bug","Terminal knee extensions (band)","Tibialis raises","Short-foot exercise","Single-leg balance"],
   'General/Other': ["Hanging leg raises","Pistol squats","Raised-leg diamond pushups","Jumping lunges","Lateral pull-ups","Upside-down shoulder press","Tricep dips","Incline pushups","Chair ups","Stair jumps","Stair sprints","Front squats","Turkish getup","Straight-arm planks","Shoulder dislocates"],
 };
+// ---- Exercise metadata: what each named exercise works (region), what kind of work it is, and which
+// body regions it loads (for injury filtering). Swaps stay inside the same region and kind, and skip
+// anything that loads a region currently flagged as painful. Kinds: strength, prehab (light 1x5-10
+// antagonist/stability), mobility, release (rolling/ball), stretch, cardio, fingers.
+const PAIN_REGIONS = ['Fingers','Wrists/forearms','Elbows','Shoulders','Upper back/neck','Lower back','Hips','Knees','Ankles/feet'];
+// Regions a week of prehab should touch (your own list: shoulders, wrists/forearms, hips, legs,
+// calves, back, core, arms, fingers).
+const PREHAB_REGIONS = ['Shoulders','Wrists/forearms','Fingers','Elbows','Upper back','Lower back','Hips','Legs','Calves/feet','Core'];
+const REGION_TO_PAIN = { 'Fingers':'Fingers','Wrists/forearms':'Wrists/forearms','Elbows':'Elbows','Shoulders':'Shoulders',
+  'Upper back':'Upper back/neck','Lower back':'Lower back','Hips':'Hips' };
+const HANG = ['Fingers','Shoulders','Elbows'];
+const PUSH = ['Shoulders','Wrists/forearms'];
+// style -> default {r: region, k: kind, s: extra strained regions}; per-name overrides follow.
+const STYLE_META = {
+  'Core Circuit': {r:'Core',k:'strength',s:[]}, 'Leg Day': {r:'Legs',k:'strength',s:['Knees']},
+  'Upper Tabata': {r:'Upper back',k:'strength',s:['Shoulders','Elbows']}, 'TRX — Core': {r:'Core',k:'strength',s:['Shoulders']},
+  'TRX — Shoulder': {r:'Shoulders',k:'strength',s:[]}, 'Full Efficient Workout': {r:'Full body',k:'strength',s:['Shoulders']},
+  'Yoga Poses': {r:'Hips',k:'stretch',s:[]}, 'Static Stretch': {r:'Hips',k:'stretch',s:[]},
+  'Foam Rolling': {r:'Legs',k:'release',s:[]}, 'Lacrosse Ball Release': {r:'Hips',k:'release',s:[]},
+  'Functional Movement': {r:'Full body',k:'mobility',s:[]}, 'Body Prep': {r:'Full body',k:'mobility',s:[]},
+  'Cardio Circuit': {r:'Full body',k:'cardio',s:[]}, 'Fingers': {r:'Fingers',k:'fingers',s:HANG},
+  'Prehab': {r:'Shoulders',k:'prehab',s:[]}, 'General/Other': {r:'Full body',k:'strength',s:[]},
+};
+const META_OVERRIDES = {
+  'Hanging leg lift':{s:HANG}, 'Farmer walk':{r:'Full body',s:['Fingers','Wrists/forearms']}, 'Plank (elevated)':{s:PUSH},
+  'Plank (sideways walk)':{s:PUSH}, 'Side plank with leg raise':{s:PUSH}, 'Full-body focus plank':{s:PUSH}, 'Oblique knee raise plank':{s:PUSH},
+  'Wheelbarrow':{s:PUSH}, 'A-frame drop':{s:['Shoulders','Lower back']}, 'Matrix lean back':{s:['Lower back']}, 'Sit-up to stand-up':{s:['Lower back']},
+  'Oblique weighted arm dip':{s:['Shoulders']}, 'Kettlebell figure 8':{s:['Wrists/forearms','Lower back']},
+  'Catcher calf raises':{r:'Calves/feet',s:['Ankles/feet']}, 'Calf jumps':{r:'Calves/feet',s:['Ankles/feet','Knees']},
+  'Hanging knee lifts':{r:'Core',s:HANG}, 'Weighted box jumps':{s:['Knees','Ankles/feet']}, 'High stepping':{s:['Knees','Ankles/feet']},
+  'Bulgarian lunges':{s:['Knees','Hips']}, 'Squat/deadlift':{s:['Knees','Lower back']}, 'Multidirectional lunges':{s:['Knees','Hips']},
+  'Core-to-toe side lunges':{s:['Knees','Hips']}, 'Bent-over rows':{s:['Lower back','Elbows']}, 'Lat pulldowns':{s:['Shoulders','Elbows']},
+  'Bicep curls':{r:'Elbows',s:['Elbows']}, 'Wrist curls':{r:'Wrists/forearms',s:['Wrists/forearms','Elbows']},
+  'Overhead squat':{r:'Full body',s:['Knees','Shoulders']}, 'Clock press':{s:['Shoulders']}, 'T-Y-I deltoid series':{k:'prehab'},
+  'Atomic pushups':{r:'Core',s:PUSH}, 'T-spine rotation':{r:'Upper back',k:'mobility',s:[]},
+  'Mountain mans (rope/pulley alternating lockouts)':{s:HANG}, 'Campus board lunges':{s:HANG}, 'Around-the-world pull-ups':{s:HANG},
+  'Offset pull-ups':{s:HANG}, 'Box jumps':{r:'Legs',s:['Knees']}, 'Step-ups onto box':{r:'Legs',s:['Knees']}, 'One-leg squats':{r:'Legs',s:['Knees']},
+  'Lunges with shoulder press':{r:'Legs',s:['Knees','Shoulders']}, 'Tucks':{r:'Core',s:[]}, 'Bridges':{r:'Hips',s:['Lower back']},
+  'Side elbow planks':{r:'Core',s:['Shoulders']}, 'Forearm plank':{r:'Core',s:['Shoulders']}, 'One-arm planks':{r:'Core',s:PUSH},
+  'Dip-bar leg raises':{r:'Core',s:['Shoulders','Elbows']}, 'Superman pushups':{s:PUSH}, 'Dolphin pushups':{s:PUSH},
+  'Bicep/tricep work':{r:'Elbows',s:['Elbows']}, 'Chest/upper work':{r:'Shoulders',s:['Shoulders']},
+  'Toe touches':{r:'Core',s:['Lower back']}, 'Scissor kicks':{r:'Core',s:['Lower back']},
+  'Downward dog':{r:'Shoulders',s:PUSH}, "Child's pose":{r:'Lower back'}, 'Pigeon pose':{r:'Hips',s:['Knees']}, 'Warrior I':{r:'Legs',s:['Knees']},
+  'Warrior II':{r:'Legs',s:['Knees']}, 'Triangle pose':{r:'Legs'}, 'Cat-cow':{r:'Lower back',k:'mobility'}, 'Cobra pose':{r:'Lower back',s:['Lower back','Wrists/forearms']},
+  'Seated forward fold':{r:'Legs',s:['Lower back']}, 'Low lunge':{r:'Hips',s:['Knees']}, 'Reclined spinal twist':{r:'Lower back'},
+  'Bridge pose':{r:'Hips',k:'mobility'}, 'Thread-the-needle':{r:'Upper back',s:['Shoulders']},
+  'Hamstring stretch':{r:'Legs'}, 'Rotator cuff stretch':{r:'Shoulders'}, 'Chest/biceps doorway stretch':{r:'Shoulders'},
+  'Thoracic spine rotation':{r:'Upper back',k:'mobility'}, 'Wrist mobility circles':{r:'Wrists/forearms',k:'mobility'},
+  'Shoulder dislocates (band/stick)':{r:'Shoulders',k:'mobility',s:['Shoulders']}, '90/90 hip switches':{r:'Hips',k:'mobility',s:['Knees']},
+  'Standing quad stretch':{r:'Legs',s:['Knees']}, 'Calf stretch (wall)':{r:'Calves/feet'}, 'Couch stretch (hip flexor)':{r:'Hips',s:['Knees']},
+  'Lat stretch (overhead reach)':{r:'Upper back'}, 'Ankle dorsiflexion stretch':{r:'Calves/feet',s:['Ankles/feet']},
+  'Seated spinal twist':{r:'Lower back'}, 'Neck rolls':{r:'Upper back'}, 'Frog stretch':{r:'Hips',s:['Knees']},
+  'Foam roll — quads':{r:'Legs'}, 'Foam roll — lats':{r:'Upper back'}, 'Foam roll — thoracic spine':{r:'Upper back'}, 'Foam roll — calves':{r:'Calves/feet'},
+  'Foam roll — glutes':{r:'Hips'}, 'Foam roll — upper back':{r:'Upper back'}, 'Lacrosse ball — feet/plantar fascia':{r:'Calves/feet'},
+  'Lacrosse ball — pecs':{r:'Shoulders'}, 'Lacrosse ball — forearms':{r:'Wrists/forearms'}, 'Lacrosse ball — traps/upper back':{r:'Upper back'},
+  'Squat-to-stand':{r:'Legs',s:['Knees']}, 'Inchworm to plank':{s:['Wrists/forearms']}, 'Animal flow — bear crawl':{s:PUSH},
+  'Turkish get-up (bodyweight)':{s:PUSH}, 'Loaded carry (farmer/suitcase)':{s:['Fingers','Wrists/forearms']}, 'Crawling patterns':{s:['Wrists/forearms']},
+  "World's greatest stretch (full combo)":{r:'Hips'}, 'Windmills':{r:'Lower back'}, 'Scorpion stretch':{r:'Lower back'},
+  'Arm circles':{r:'Shoulders'}, 'Leg swings (front-back)':{r:'Hips'}, 'Leg swings (side-side)':{r:'Hips'}, 'Hip circles':{r:'Hips'},
+  'Walking lunges with twist':{r:'Legs',s:['Knees']}, 'High knees march':{r:'Legs',k:'cardio'}, 'Band pull-aparts':{r:'Upper back',k:'prehab'},
+  'Wall slides':{r:'Shoulders',k:'prehab'},
+  'Jump rope':{s:['Ankles/feet','Knees']}, 'Rowing intervals':{s:['Lower back']}, 'Stair sprints':{s:['Knees']}, 'Suicide sprints':{s:['Knees','Ankles/feet']},
+  'Bike intervals':{s:['Knees']}, 'Burpees':{s:['Wrists/forearms','Shoulders','Knees']},
+  'Wrist curls (health/prehab)':{r:'Wrists/forearms',k:'prehab',s:['Wrists/forearms']}, 'Finger extensions (rubber band)':{k:'prehab',s:[]},
+  'Hanging leg raises':{r:'Core',s:HANG}, 'Pistol squats':{r:'Legs',s:['Knees']}, 'Raised-leg diamond pushups':{s:['Shoulders','Wrists/forearms','Elbows']},
+  'Jumping lunges':{r:'Legs',s:['Knees']}, 'Lateral pull-ups':{r:'Upper back',s:HANG}, 'Upside-down shoulder press':{r:'Shoulders',s:PUSH},
+  'Tricep dips':{r:'Elbows',s:['Shoulders','Elbows','Wrists/forearms']}, 'Incline pushups':{r:'Shoulders',s:PUSH}, 'Chair ups':{r:'Legs',s:['Knees']},
+  'Stair jumps':{r:'Legs',s:['Knees','Ankles/feet']}, 'Front squats':{r:'Legs',s:['Knees','Wrists/forearms','Lower back']},
+  'Turkish getup':{s:PUSH}, 'Straight-arm planks':{r:'Core',s:PUSH},
+  // Prehab
+  'Band external rotation':{r:'Shoulders'}, 'Scapular push-ups':{r:'Shoulders',s:['Wrists/forearms']}, 'Prone Y raises':{r:'Upper back'},
+  'Prone T raises':{r:'Upper back'}, 'Wall angels':{r:'Shoulders'}, 'Face pulls (band)':{r:'Upper back'},
+  'Reverse wrist curls':{r:'Wrists/forearms',s:['Wrists/forearms']}, 'Wrist pronation-supination (light weight)':{r:'Wrists/forearms',s:['Wrists/forearms']},
+  'Radial-ulnar deviation (light weight)':{r:'Wrists/forearms',s:['Wrists/forearms']}, 'Band wrist extensions':{r:'Wrists/forearms',s:['Wrists/forearms']},
+  'Eccentric wrist extensions (slow lower)':{r:'Elbows',s:['Wrists/forearms','Elbows']}, 'Band triceps extensions':{r:'Elbows',s:['Elbows']},
+  'Prone cobra':{r:'Upper back',s:['Lower back']}, 'Clamshells':{r:'Hips'}, 'Banded lateral walks':{r:'Hips',s:['Knees']}, 'Glute bridges':{r:'Hips',s:['Lower back']},
+  'Fire hydrants':{r:'Hips'}, 'Bird dog':{r:'Core',s:['Wrists/forearms']}, 'Dead bug':{r:'Core'}, 'Terminal knee extensions (band)':{r:'Legs',s:['Knees']},
+  'Tibialis raises':{r:'Calves/feet'}, 'Short-foot exercise':{r:'Calves/feet'}, 'Single-leg balance':{r:'Calves/feet'},
+};
+const EXERCISE_META = (function(){
+  const out = {};
+  Object.keys(EXERCISE_LIBRARY).forEach(style => {
+    const def = STYLE_META[style] || STYLE_META['General/Other'];
+    EXERCISE_LIBRARY[style].forEach(name => {
+      if (out[name]) return; // first style listing a name wins, same as the logging picker
+      const ov = META_OVERRIDES[name] || {};
+      const r = ov.r || def.r, k = ov.k || def.k;
+      const strains = new Set((ov.s !== undefined ? ov.s : def.s).slice());
+      if (REGION_TO_PAIN[r]) strains.add(REGION_TO_PAIN[r]);
+      out[name] = { style, r, k, strains: [...strains] };
+    });
+  });
+  return out;
+})();
+const EXERCISE_META_LOWER = (function(){ const o = {}; Object.keys(EXERCISE_META).forEach(n => { o[n.toLowerCase()] = EXERCISE_META[n]; }); return o; })();
+function exerciseMeta(name){ return name ? (EXERCISE_META_LOWER[String(name).trim().toLowerCase()] || null) : null; }
+
 // Which workout styles are worth surfacing for each session type — so picking "Cardio" doesn't
 // show you TRX options and picking "Fingers" doesn't show you Cardio Circuit. Strength, Antagonist,
 // and Core Workout all share the same full routine set, since any of these named routines could
@@ -96,12 +198,12 @@ const STRENGTH_LIKE_STYLES = ['Core Circuit','Leg Day','Upper Tabata','TRX — C
 // type checkbox you picked to get there.
 const ROUTINE_IMPLIES_TYPE = { 'Core Circuit':'Core Workout', 'TRX — Core':'Core Workout' };
 const TYPE_RELEVANT_STYLES = {
-  'Antagonist / Stabilizer': STRENGTH_LIKE_STYLES,
+  'Antagonist / Stabilizer': STRENGTH_LIKE_STYLES.concat(['Prehab']),
   'Strength': STRENGTH_LIKE_STYLES,
   'Core Workout': STRENGTH_LIKE_STYLES,
   'Cardio': ['Cardio Circuit','General/Other'],
   'Flexibility / Stretch': ['Yoga Poses','Static Stretch'],
-  'Mobility': ['Foam Rolling','Lacrosse Ball Release','Functional Movement','Body Prep'],
+  'Mobility': ['Foam Rolling','Lacrosse Ball Release','Functional Movement','Body Prep','Prehab'],
   'Fingers': ['Fingers'],
 };
 
@@ -386,7 +488,7 @@ function freshLogDraft(){
     dayTypes:[], dayTypesOther:'', focus:[], wallAngle:[], holdTypes:[],
     timeClimb:0, timeFingers:0, timeStrength:0, timeAntag:0, timeCore:0, timeFlexibility:0, timeMobility:0, timeCardio:0,
     workoutStyles:[], exercisesDone:[], muscleGroup:[], powerLevel:'', coreRegion:[], coreMovementType:[],
-    failurePoints:[], failurePointsOther:'', pain:'None', notes:'', plan:'', planAdherence:'' };
+    failurePoints:[], failurePointsOther:'', pain:'None', painRegions:[], notes:'', plan:'', planAdherence:'' };
 }
 function freshAskDraft(){
   return { minutes:60, feeling:3, sessionTypes:['Climbing'], focusMode:'weak', focusPick:'', focusOther:'', focusSecondary:'',
@@ -798,10 +900,18 @@ function climbingSessionsSinceLastAssessment(){
   return dayList(App.entries).filter(d => d.date > cutoff && classifyDay(d)==='Climb').length;
 }
 
-function getMostRecentPainStatus(entries){
+function getMostRecentPainEntry(entries){
   const sorted = [...entries].sort((a,b)=> b.date.localeCompare(a.date));
-  const withPain = sorted.find(e => e.pain);
-  return withPain ? withPain.pain : 'None logged yet';
+  return sorted.find(e => e.pain) || null;
+}
+function getMostRecentPainStatus(entries){
+  const e = getMostRecentPainEntry(entries);
+  return e ? e.pain : 'None logged yet';
+}
+// Body regions flagged on the same entry the pain status comes from; empty once pain is cleared.
+function getActivePainRegions(entries){
+  const e = getMostRecentPainEntry(entries || App.entries);
+  return (e && e.pain !== 'None') ? arr(e.painRegions).filter(r => PAIN_REGIONS.includes(r)) : [];
 }
 
 // One-tap way to clear the pain flag without going through the full log form.
@@ -812,10 +922,11 @@ function clearPainFlag(){
   const todaysEntries = App.entries.filter(e => e.date === today);
   if (todaysEntries.length > 0) {
     todaysEntries[todaysEntries.length - 1].pain = 'None';
+    todaysEntries[todaysEntries.length - 1].painRegions = [];
   } else {
     App.entries.push(Object.assign(freshLogDraft(), { id: uid(), date: today, type:'Rest', duration:0,
       timeClimb:0, focus:[], wallAngle:[], holdTypes:[], failurePoints:[], dayTypes:[], intensity:'',
-      pain:'None', notes:'Pain flag cleared via quick action.' }));
+      pain:'None', painRegions:[], notes:'Pain flag cleared via quick action.' }));
   }
   App.entries.sort((a,b)=> a.date.localeCompare(b.date));
   App.saveEntries();
@@ -1046,11 +1157,21 @@ async function saveGeneratedPlanToLog(){
 // Gathers the named exercises actually relevant to what's being asked for, so the plan can be told
 // to draw from them — otherwise the model has no idea this bank exists and just invents its own,
 // which is why curated exercises were never actually getting suggested.
+// Style banks a climbing session draws warmup and health work from (kept apart from
+// TYPE_RELEVANT_STYLES, which also narrows the Log screen's routine picker).
+const CLIMBING_BANK_STYLES = ['Body Prep','Prehab','Functional Movement','Fingers','Static Stretch'];
 function relevantExerciseBankText(sessionTypes, routineStyle){
   const styles = new Set();
   if (routineStyle && EXERCISE_LIBRARY[routineStyle]) styles.add(routineStyle);
   sessionTypes.forEach(t => { (TYPE_RELEVANT_STYLES[t]||[]).forEach(s => styles.add(s)); });
-  const lines = [...styles].filter(s => EXERCISE_LIBRARY[s]).map(s => `${s}: ${EXERCISE_LIBRARY[s].join(', ')}`);
+  if (sessionTypes.includes('Climbing')) CLIMBING_BANK_STYLES.forEach(s => styles.add(s));
+  const lines = [...styles].filter(s => EXERCISE_LIBRARY[s]).map(s => {
+    if (s !== 'Prehab') return `${s}: ${EXERCISE_LIBRARY[s].join(', ')}`;
+    // grouped by region so a week's coverage can be planned across them
+    const byRegion = {};
+    EXERCISE_LIBRARY[s].forEach(n => { const m = exerciseMeta(n); const r = m ? m.r : 'Other'; (byRegion[r] = byRegion[r] || []).push(n); });
+    return 'Prehab (1x5 to 1x10, by region): ' + Object.keys(byRegion).map(r => `${r}: ${byRegion[r].join(', ')}`).join('; ');
+  });
   return lines.join('\n');
 }
 
@@ -1255,6 +1376,9 @@ async function askClaude(feedback){
       "for it, so don't hold back for the sake of it. The recent log also shows how earlier sessions felt — a run " +
       "of low scores is a reason to back off even if today's rating is middling. Still respect the minutes budget " +
       "and any pain.\n\n" +
+      "When affected regions are listed on the pain line, leave out every exercise that loads them (hanging and " +
+      "pulling load fingers, forearms, elbows and shoulders; planks, push-ups and crawls load wrists and shoulders; " +
+      "lunges, squats and jumps load knees and ankles) and prefer work for unaffected areas.\n\n" +
       "'Current pain status' line is the authoritative, most recent state — if it says None, do not dwell on older " +
       "pain mentions elsewhere in the log; if it says anything else, do not prescribe exercise for the affected area, " +
       "recommend rest and seeing a doctor or physical therapist instead, and only plan around unaffected areas if " +
@@ -1263,7 +1387,7 @@ async function askClaude(feedback){
     const userMsg = `Cycle: ${App.settings.cycleType}, currently in "${cycle.phaseName}" (week ${cycle.weekOfPhase} of ${cycle.phaseLengthWeeks}).\n` +
       `Phase guideline: ${guidance}\n` +
       `Indoor grade: ${App.settings.gradeIndoor || 'not set'} · Outdoor grade: ${App.settings.gradeOutdoor || 'not set'}\n` +
-      `Current pain status (most recent entry): ${mostRecentPain}\n` +
+      `Current pain status (most recent entry): ${mostRecentPain}${getActivePainRegions(App.entries).length ? ' — affected regions: ' + getActivePainRegions(App.entries).join(', ') : ''}\n` +
       `This week vs. usual rhythm: ${tmplLine}\n` +
       `Weekly guidelines not yet hit this week: ${guidelineLine}\n` +
       `Weak-point profile (background context regardless of today's priority-focus choice): ${weakPointLine}\n` +
@@ -1613,20 +1737,8 @@ function categorizeSection(title, bucket){
   const kw = categorizeHeader(title);
   return (kw === 'default' && bucket) ? bucket : kw;
 }
-// Which named-exercise banks make sense to pull a replacement from for each category. Climbing and
-// mental cues deliberately have no pool, and neither does the finger/forearm health block: that
-// bank mixes max-strength hangs in with the health work, so a random swap could trade a light
-// extension for a hard hang. It gets a properly tagged pool with the exercise-library rework.
-const CATEGORY_EXERCISE_POOLS = {
-  warmup: ['Body Prep','Static Stretch','Functional Movement'],
-  core: ['Core Circuit','TRX — Core'],
-  strength: ['Upper Tabata','Full Efficient Workout','Leg Day'],
-  antag: ['TRX — Shoulder','Upper Tabata'],
-  flexibility: ['Yoga Poses','Static Stretch'],
-  mobility: ['Foam Rolling','Lacrosse Ball Release','Functional Movement','Body Prep'],
-  cardio: ['Cardio Circuit'],
-  default: ['General/Other'],
-};
+// Climbing and mental cues have no bodyweight-exercise equivalent to swap in, and the finger/forearm
+// health block waits for its own light-work pool, so none of the three offers a swap.
 const NO_SWAP_CATEGORIES = ['climb','mental','fingers'];
 // A locally-swapped exercise needs its own sensible default detail — reusing the exercise it's
 // replacing would leave a stale, potentially nonsensical prescription attached (e.g. a rep-based
@@ -1644,14 +1756,40 @@ function defaultDetailFor(name){
   if (/curl|press|row|raise|squat|lift|push|pull|extension|fly/.test(n)) return '3 x 10-12';
   return '2-3 sets';
 }
-// Cycles through the pool per line rather than picking purely at random each tap, so repeated taps
+// What kinds of exercise a section category will accept as a swap, and a region requirement for
+// categories that are defined by one (core means core, whatever the current line is).
+const CATEGORY_SWAP_RULES = {
+  warmup: { kinds:['mobility','prehab','cardio'] }, core: { kinds:['strength','prehab'], regions:['Core'] },
+  strength: { kinds:['strength'] }, antag: { kinds:['prehab','strength'], regions:['Shoulders','Wrists/forearms','Upper back','Elbows'] },
+  flexibility: { kinds:['stretch'] }, mobility: { kinds:['mobility','release','stretch'] }, cardio: { kinds:['cardio'] },
+  default: { kinds:['strength','prehab','mobility','stretch','release','cardio'] },
+};
+// Candidates for replacing one exercise: same kind of work as the section, the same body region as the
+// exercise being replaced when that's known, and nothing that loads a currently flagged region.
+function swapCandidates(category, currentName){
+  const rule = CATEGORY_SWAP_RULES[category] || CATEGORY_SWAP_RULES.default;
+  const pain = getActivePainRegions(App.entries);
+  const cur = exerciseMeta(currentName);
+  let pool = Object.keys(EXERCISE_META).filter(n => {
+    const m = EXERCISE_META[n];
+    if (n === currentName || !rule.kinds.includes(m.k)) return false;
+    if (rule.regions && !rule.regions.includes(m.r)) return false;
+    if (pain.length && m.strains.some(x => pain.includes(x))) return false;
+    return true;
+  });
+  if (cur && cur.r) {
+    const sameRegion = pool.filter(n => EXERCISE_META[n].r === cur.r);
+    if (sameRegion.length >= 2) pool = sameRegion;
+  }
+  return pool;
+}
+// Cycles through candidates per line rather than picking purely at random each tap, so repeated taps
 // work through genuinely different options instead of occasionally repeating one you just saw.
 function pickSwapAlternative(category, currentName, index){
-  const styles = CATEGORY_EXERCISE_POOLS[category] || CATEGORY_EXERCISE_POOLS.default;
-  const fullPool = [...new Set(styles.flatMap(s => EXERCISE_LIBRARY[s] || []))];
+  const fullPool = swapCandidates(category, currentName);
   const history = App.ui.swapHistory[index] || [];
-  let pool = fullPool.filter(x => x !== currentName && !history.includes(x));
-  if (!pool.length) { App.ui.swapHistory[index] = []; pool = fullPool.filter(x => x !== currentName); }
+  let pool = fullPool.filter(x => !history.includes(x));
+  if (!pool.length) { App.ui.swapHistory[index] = []; pool = fullPool; }
   if (!pool.length) return null;
   const choice = pool[Math.floor(Math.random() * pool.length)];
   App.ui.swapHistory[index] = (App.ui.swapHistory[index] || []).concat([choice]);
@@ -2108,7 +2246,7 @@ function renderHome(){
   let banners = '';
   const painStatus = getMostRecentPainStatus(App.entries);
   if (painStatus && painStatus !== 'None' && painStatus !== 'None logged yet') {
-    banners += `<div class="banner warn"><b>Pain still flagged:</b> ${escHtml(painStatus)} — from your most recent entry, sent with every plan request.
+    banners += `<div class="banner warn"><b>Pain still flagged:</b> ${escHtml(painStatus)}${getActivePainRegions(App.entries).length ? ' (' + escHtml(getActivePainRegions(App.entries).join(', ')) + ')' : ''} — from your most recent entry, sent with every plan request.
       <div style="margin-top:8px;"><button class="btn btn-ghost" style="width:auto;padding:8px 14px;" onclick="clearPainFlag()">Turn off — no pain today</button></div></div>`;
   }
   if (dueCount >= 24) {
@@ -2336,6 +2474,7 @@ function renderPlan(){
   return `
   <div class="card">
     ${renderPlanHero(App.ui.planText, d.sessionTypes, d.minutes)}
+    ${getActivePainRegions(App.entries).length ? `<p class="small muted" style="margin:8px 0 0;">Avoiding exercises that load: ${escHtml(getActivePainRegions(App.entries).join(', '))} (flagged in your last log). Swaps skip them too.</p>` : ''}
     ${renderTimerWidget()}
     ${renderSectionCarousel(App.ui.planText)}
     <div class="plan-editable">${renderPlanEditable(App.ui.planText)}</div>
@@ -2484,7 +2623,9 @@ function renderLog(){
     </div>` : ''}
     ` : ''}
     ${d.plan ? `<div class="field"><label>How closely did you follow the plan? (optional)</label>${pillsHTML(ADHERENCE_OPTIONS, d.planAdherence, 'setLogAdherence', {sm:true})}</div>` : ''}
-    <div class="field"><label>Pain or discomfort</label>${pillsHTML(PAIN_OPTIONS, d.pain, 'setLogPain', {sm:true})}</div>
+    <div class="field"><label>Pain or discomfort</label>${pillsHTML(PAIN_OPTIONS, d.pain, 'setLogPain', {sm:true})}
+      ${d.pain !== 'None' ? `<div style="margin-top:8px;"><div class="small muted" style="margin-bottom:6px;">Where? Plans will avoid exercises that load these.</div>${pillsHTML(PAIN_REGIONS, arr(d.painRegions), 'toggleLogPainRegion', {sm:true})}</div>` : ''}
+    </div>
     ${!isRest ? `
     <button type="button" onclick="toggleLogMore()" style="background:none;border:none;color:var(--gold);font-size:0.8rem;padding:4px 0;cursor:pointer;margin-top:6px;">
       ${moreOpen ? 'Hide extra detail &#9650;' : 'Add more detail — day type, focus areas, routine, etc. (optional) &#9660;'}
@@ -2679,7 +2820,8 @@ function toggleMentalFocus(){ App.ui.askDraft.mentalFocus = !App.ui.askDraft.men
 function setLogFeeling(v){ App.ui.logDraft.feeling = Number(v); App.render(); }
 function setLogIntensity(v){ App.ui.logDraft.intensity = v; App.render(); }
 function setLogAdherence(v){ App.ui.logDraft.planAdherence = App.ui.logDraft.planAdherence === v ? '' : v; App.render(); }
-function setLogPain(v){ App.ui.logDraft.pain = v; App.render(); }
+function setLogPain(v){ App.ui.logDraft.pain = v; if (v === 'None') App.ui.logDraft.painRegions = []; App.render(); }
+function toggleLogPainRegion(r){ App.ui.logDraft.painRegions = arr(App.ui.logDraft.painRegions).slice(); toggleArr(App.ui.logDraft.painRegions, r); App.render(); }
 function setLogType(t){
   App.ui.logDraft.type = t;
   // Reset every time, not just when empty — otherwise a style/tag picked for a previous type
@@ -2761,7 +2903,7 @@ function editEntry(id){
   App.ui.logDraft = Object.assign(freshLogDraft(), JSON.parse(JSON.stringify(e)));
   // Older entries may have some of these as free-text strings from before they were tag arrays —
   // normalize on the way into the editable draft so every downstream handler can assume an array.
-  ['dayTypes','focus','wallAngle','holdTypes','workoutStyles','exercisesDone','muscleGroup','coreRegion','coreMovementType','failurePoints']
+  ['dayTypes','focus','wallAngle','holdTypes','workoutStyles','exercisesDone','muscleGroup','coreRegion','coreMovementType','failurePoints','painRegions']
     .forEach(f => { App.ui.logDraft[f] = arr(App.ui.logDraft[f]); });
   App.ui.climbsDraft = arr(e.climbs).slice();
   // Surface any nonzero time field beyond the type's primary one, so an old multi-component entry
@@ -2950,7 +3092,7 @@ window.EXERCISE_LIBRARY = EXERCISE_LIBRARY; window.WORKOUT_STYLES = WORKOUT_STYL
 window.FOCUS_AREAS = FOCUS_AREAS; window.ADHERENCE_OPTIONS = ADHERENCE_OPTIONS;
 window.setAskFeeling = setAskFeeling; window.toggleAskType = toggleAskType;
 window.setFocusMode = setFocusMode; window.setFocusPick = setFocusPick; window.setFocusSecondary = setFocusSecondary;
-window.setLogFeeling = setLogFeeling; window.setLogIntensity = setLogIntensity; window.setLogPain = setLogPain;
+window.toggleLogPainRegion = toggleLogPainRegion; window.setLogFeeling = setLogFeeling; window.setLogIntensity = setLogIntensity; window.setLogPain = setLogPain;
 window.toggleLogFocus = toggleLogFocus; window.toggleLogWall = toggleLogWall; window.toggleLogHold = toggleLogHold;
 window.toggleLogDayType = toggleLogDayType; window.toggleLogFailurePoint = toggleLogFailurePoint;
 window.setClimbLocation = setClimbLocation;
