@@ -161,16 +161,19 @@
   .stopwatch-num{font-family:'Big Shoulders Display',sans-serif;font-weight:700;font-size:1.15rem;flex:1;}
   /* the gold frame is the overlay itself; tapping it (not the card inside) minimises the timer */
   .timer-expanded-overlay{position:fixed;inset:0;background:var(--gold);display:flex;align-items:center;
-    justify-content:center;z-index:70;padding:16px;box-sizing:border-box;}
-  .timer-expanded-box{--dial:min(calc(100vw - 80px),50vh,560px);background:var(--surface);border-radius:14px;padding:48px 24px calc(28px + env(safe-area-inset-bottom));width:100%;height:100%;
+    justify-content:center;z-index:70;padding:10px;box-sizing:border-box;}
+  /* dial height comes from the viewport that is actually visible (dvh follows the mobile browser bar), so the
+     whole card fits without scrolling even right after the bar slides back in */
+  .timer-expanded-box{--dial:min(calc(100vw - 96px),32vh,340px);background:var(--surface);border-radius:14px;padding:40px 20px calc(18px + env(safe-area-inset-bottom));width:100%;height:100%;
     overflow-y:auto;display:flex;flex-direction:column;align-items:center;position:relative;
     box-sizing:border-box;}
+  @supports (height:1dvh){.timer-expanded-box{--dial:min(calc(100vw - 96px),32dvh,340px);}}
   /* spacers centre the content when it fits, and collapse to nothing when it overflows so the top stays reachable */
   .timer-expanded-box::before,.timer-expanded-box::after{content:'';flex:1 0 0;}
   .timer-expanded-dial{width:var(--dial);height:auto;}
-  .timer-expanded-controls{display:flex;justify-content:center;gap:14px;margin-top:24px;}
-  .timer-expanded-stopwatch{margin-top:34px;padding-top:24px;border-top:1px solid var(--border);width:100%;text-align:center;}
-  .stopwatch-num-big{font-family:'Big Shoulders Display',sans-serif;font-weight:700;font-size:calc(var(--dial) * 80 / 230);line-height:1.05;margin-top:4px;} /* 80/230 = countdown font-size / dial viewBox, so both read the same size */
+  .timer-expanded-controls{display:flex;justify-content:center;gap:12px;margin-top:14px;}
+  .timer-expanded-stopwatch{margin-top:18px;padding-top:12px;border-top:1px solid var(--border);width:100%;text-align:center;}
+  .stopwatch-num-big{font-family:'Big Shoulders Display',sans-serif;font-weight:700;font-size:calc(var(--dial) * 80 / 230);line-height:1.05;margin-top:2px;} /* 80/230 = countdown font-size / dial viewBox, so both read the same size */
   .chart-legend{display:flex;flex-wrap:wrap;gap:8px 12px;margin-bottom:10px;}
   .chart-legend span{display:inline-flex;align-items:center;gap:5px;font-size:0.7rem;color:var(--muted);}
   .chart-legend i{width:9px;height:9px;border-radius:2px;display:inline-block;}

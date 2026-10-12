@@ -1897,7 +1897,7 @@ function renderTimerExpanded(){
   const r = 100, circumference = 2 * Math.PI * r;
   const frac = t.totalSeconds > 0 ? t.remainingSeconds / t.totalSeconds : 0;
   const offset = circumference * (1 - frac);
-  return `<div class="timer-expanded-overlay" onclick="if(event.target===this) toggleTimerExpanded()">
+  return `<div class="timer-expanded-overlay" onclick="timerOverlayTap(event)">
     <div class="timer-expanded-box">
       <button class="close-x" style="position:absolute;top:14px;right:14px;" onclick="toggleTimerExpanded()" title="Shrink">&times;</button>
       <button type="button" class="timer-dial-btn" onclick="toggleTimerPicker()" title="Choose time">
@@ -1912,15 +1912,15 @@ function renderTimerExpanded(){
         ${TIMER_PRESETS.map(s=>`<button class="pill${t.totalSeconds===s?' active':''}" onclick="setTimerPreset(${s})">${formatPresetLabel(s)}</button>`).join('')}
       </div>` : ''}
       <div class="timer-expanded-controls">
-        <button class="btn btn-primary" style="width:auto;padding:16px 32px;font-size:1.05rem;" id="timerToggleBtn" onclick="toggleTimer()">${t.running ? 'Pause' : (t.remainingSeconds < t.totalSeconds && t.remainingSeconds > 0 ? 'Resume' : 'Start')}</button>
-        <button class="btn btn-ghost" style="width:auto;padding:16px 24px;font-size:1.05rem;" onclick="resetTimer()">Reset</button>
+        <button class="btn btn-primary" style="width:auto;padding:13px 30px;font-size:1.05rem;" id="timerToggleBtn" onclick="toggleTimer()">${t.running ? 'Pause' : (t.remainingSeconds < t.totalSeconds && t.remainingSeconds > 0 ? 'Resume' : 'Start')}</button>
+        <button class="btn btn-ghost" style="width:auto;padding:13px 22px;font-size:1.05rem;" onclick="resetTimer()">Reset</button>
       </div>
       <div class="timer-expanded-stopwatch">
         <div class="stopwatch-label">Stopwatch</div>
         <div id="stopwatchNum" class="stopwatch-num-big">${formatMMSS(sw.elapsedSeconds)}</div>
-        <div class="timer-expanded-controls" style="margin-top:10px;">
-          <button class="btn btn-ghost" style="width:auto;padding:12px 24px;" id="stopwatchToggleBtn" onclick="toggleStopwatch()">${sw.running ? 'Pause' : (sw.elapsedSeconds > 0 ? 'Resume' : 'Start')}</button>
-          <button class="btn btn-ghost" style="width:auto;padding:12px 20px;" onclick="resetStopwatch()">Reset</button>
+        <div class="timer-expanded-controls" style="margin-top:6px;">
+          <button class="btn btn-ghost" style="width:auto;padding:10px 22px;" id="stopwatchToggleBtn" onclick="toggleStopwatch()">${sw.running ? 'Pause' : (sw.elapsedSeconds > 0 ? 'Resume' : 'Start')}</button>
+          <button class="btn btn-ghost" style="width:auto;padding:10px 18px;" onclick="resetStopwatch()">Reset</button>
         </div>
       </div>
     </div>
@@ -1928,6 +1928,12 @@ function renderTimerExpanded(){
 }
 function toggleTimerPicker(){ App.ui.timer.pickerOpen = !App.ui.timer.pickerOpen; App.render(); }
 function toggleTimerExpanded(){ App.ui.timer.expanded = !App.ui.timer.expanded; App.render(); }
+// The expanded timer closes on a tap anywhere that isn't a control, so there's no thin frame to
+// aim for. Buttons and inputs keep doing their own job.
+function timerOverlayTap(e){
+  if (e.target.closest('button, input, select, a, .pill')) return;
+  toggleTimerExpanded();
+}
 function setTimerPreset(seconds){
   pauseTimerInterval();
   App.ui.timer.totalSeconds = seconds;
@@ -2934,7 +2940,7 @@ window.App = App;
 window.showInfo = showInfo; window.closeInfo = closeInfo;
 window.setTimerPreset = setTimerPreset; window.toggleTimer = toggleTimer; window.resetTimer = resetTimer;
 window.toggleTimerPicker = toggleTimerPicker; window.TIMER_PRESETS = TIMER_PRESETS;
-window.toggleTimerExpanded = toggleTimerExpanded;
+window.toggleTimerExpanded = toggleTimerExpanded; window.timerOverlayTap = timerOverlayTap;
 window.toggleStopwatch = toggleStopwatch; window.resetStopwatch = resetStopwatch;
 window.removePlanLine = removePlanLine; window.movePlanLine = movePlanLine; window.swapPlanLine = swapPlanLine;
 window.toggleLogMore = toggleLogMore; window.autoGrow = autoGrow;
