@@ -32,6 +32,14 @@ Whenever asking the user to review a change before it goes to `main`, include a 
 - The preview runs on a different origin from the live site, so it never has the real log or API key, and the Artifact sandbox blocks calls to api.anthropic.com. Plan generation, adjust and add-to-log (which calls the API) can't be exercised there; say so and verify those with jsdom instead.
 - The link is for review only. Pushing `main` is still a separate, explicit ask.
 
+## Docs
+
+`docs/` holds generated documents of the exercise library, the coach deck and the training structure (markdown, SVG illustrations, a PDF). After changing exercises, drills, illustrations or the session model, regenerate with `node tools/export-library.js` (needs jsdom), then re-make the PDF. The `docs-library` branch carries a documents-only copy for viewing on GitHub.
+
+## Two sessions in one folder
+
+If another Claude session may be working in this same iCloud folder, don't switch branches here. Do the work in a separate worktree on its own branch (`git worktree add <dir> -b <branch> main`) and merge when finished.
+
 ## Git on this machine (Mac only)
 
 Apple's Command Line Tools are unavailable for this macOS version, so `/usr/bin/git` is a non-working stub. Use the portable git at `~/.local/bin/git` (wraps dugite's git in `~/.local/git-portable`). Put it on PATH first:
