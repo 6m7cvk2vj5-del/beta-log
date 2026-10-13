@@ -525,6 +525,100 @@ const ILLUSTRATIONS = [
       pose:{hip:[84,70], torso:80, head:86, hands:[[102,40],[102,44]], feet:[[100,96],[100,82]]},
       props:[...WALL, {k:'hold',x:102,y:42}, {k:'hold',x:100,y:96}, {k:'hold',x:100,y:82}, {k:'arrow',x1:72,y1:70,x2:72,y2:82}] },
   ]},
+
+  { names:['push-ups','push-up','incline pushups','superman pushups','raised-leg diamond pushups','atomic pushups','dolphin pushups'], title:'Push-up', view:[0,50,120,64], steps:[
+    { cap:'Hands under the shoulders, body one straight line',
+      pose:{hip:[58,86], torso:13, head:13, hands:[[96,104],[100,104]], feet:[[22,102],[26,102]]}, props:[FLOOR] },
+    { cap:'Lower with the elbows back until the chest is a fist from the floor',
+      pose:{hip:[58,98], torso:5, head:5, hands:[[96,104],[100,104]], feet:[[22,103],[26,103]]},
+      props:[FLOOR, {k:'arrow',x1:58,y1:60,x2:58,y2:78}] },
+  ]},
+  { names:['dead hang','pull-ups','pull-up','finger pull-ups','lateral pull-ups','offset pull-ups','around-the-world pull-ups'], title:'Dead hang and pull-up', steps:[
+    { cap:'Hang from the bar with active shoulders, not sagging into them',
+      pose:{hip:[60,74], torso:90, head:98, hands:[[56,16],[64,16]], feet:[[58,112],[62,112]], eb:[1,1]}, props:[{k:'bar',x1:30,x2:90,y:16}] },
+    { cap:'Pull the elbows down until the chin clears the bar',
+      pose:{hip:[60,52], torso:90, head:90, hands:[[56,16],[64,16]], feet:[[58,90],[62,90]], eb:[-1,-1]},
+      props:[{k:'bar',x1:30,x2:90,y:16}, {k:'arrow',x1:84,y1:60,x2:84,y2:40}] },
+  ]},
+  { names:['deep squat hold','squat','bodyweight squat','chair ups','front squats','one-leg squats','pistol squats'], title:'Deep squat hold', view:[0,24,120,92], steps:[
+    { cap:'Feet shoulder-width, sit down with heels flat and chest tall',
+      pose:{hip:[32,92], torso:74, head:82, hands:[[58,74],[58,74]], feet:[[46,104],[52,104]]}, props:[FLOOR] },
+  ]},
+  { names:['single-leg balance','single-leg balance, eyes closed'], title:'Single-leg balance', steps:[
+    { cap:'Stand tall on one leg, hands on hips, eyes on a spot (then closed)',
+      pose:{hip:[60,66], torso:90, head:90, hands:[[78,66],[42,66]], feet:[[60,104],[72,88]]}, props:[FLOOR] },
+  ]},
+  { names:['squat/deadlift','hip hinge','romanian deadlift'], title:'Hip hinge', view:[0,20,120,96], steps:[
+    { cap:'Stand tall, soft knees, ribs down',
+      pose:{hip:[56,68], torso:90, head:90, hands:[[56,92],[58,92]], feet:[[58,104],[62,104]]}, props:[FLOOR] },
+    { cap:'Push the hips back, flat back, hands slide down the thighs',
+      pose:{hip:[40,68], torso:38, head:44, hands:[[66,94],[68,94]], feet:[[58,104],[62,104]]},
+      props:[FLOOR, {k:'arrow',x1:60,y1:60,x2:44,y2:60}] },
+  ]},
+  { names:['lunges','multidirectional lunges','walking lunges with twist','jumping lunges','bulgarian lunges','core-to-toe side lunges','low lunge'], title:'Lunge', view:[0,24,120,92], steps:[
+    { cap:'Long step, back knee drops straight down, torso tall',
+      pose:{hip:[56,76], torso:90, head:90, hands:[[62,66],[50,66]], feet:[[82,104],[24,102]], kb:[-1,1]}, props:[FLOOR] },
+  ]},
+  { names:['wall sits','wall sit'], title:'Wall sit', view:[10,24,110,92], steps:[
+    { cap:'Back flat on the wall, thighs level, knees over the ankles',
+      pose:{hip:[36,80], torso:90, head:90, hands:[[48,84],[48,84]], feet:[[60,104],[66,104]]},
+      props:[FLOOR, {k:'wall',x:26}] },
+  ]},
+  { names:['catcher calf raises','calf raises','calf jumps'], title:'Calf raise', view:[0,10,120,104], steps:[
+    { cap:'Stand tall, feet flat',
+      pose:{hip:[60,66], torso:90, head:90, hands:[[78,70],[42,70]], feet:[[60,104],[64,104]]}, props:[FLOOR] },
+    { cap:'Rise onto the toes, pause, lower slowly',
+      pose:{hip:[60,60], torso:90, head:90, hands:[[78,64],[42,64]], feet:[[60,104],[64,104]]},
+      props:[FLOOR, {k:'arrow',x1:100,y1:70,x2:100,y2:52}] },
+  ]},
+  { names:['prone cobra','prone y raises','prone t raises','prone y raises'], title:'Prone cobra', view:[0,60,120,52], steps:[
+    { cap:'Face down, arms long. Lift the chest and arms, squeeze the shoulder blades',
+      pose:{hip:[74,100], torso:158, head:158, hands:[[20,86],[18,90]], feet:[[110,101],[112,101]]},
+      props:[FLOOR, {k:'arrow',x1:38,y1:70,x2:38,y2:58}] },
+  ]},
+  { names:['hollow hold','toe touches','scissor kicks'], title:'Hollow hold', view:[0,56,120,56], steps:[
+    { cap:'Low back pressed down, shoulders and legs just off the floor',
+      pose:{hip:[60,100], torso:166, head:166, hands:[[6,84],[4,86]], feet:[[96,89],[98,91]]}, props:[FLOOR] },
+  ]},
+  { names:['hamstring stretch','seated forward fold','standing quad stretch'], title:'Seated forward fold', view:[0,56,120,60], steps:[
+    { cap:'Legs long, hinge from the hips and reach toward the feet',
+      pose:{hip:[48,98], torso:44, head:30, hands:[[86,100],[90,100]], feet:[[88,102],[92,102]]}, props:[FLOOR] },
+  ]},
+  { names:['hip flexor stretch','couch stretch (hip flexor)','low lunge'], title:'Hip flexor stretch', view:[0,24,120,92], steps:[
+    { cap:'Back knee down, tuck the tailbone, reach up on the same side',
+      pose:{hip:[52,80], torso:90, head:92, hands:[[58,34],[56,36]], feet:[[76,104],[20,104]], kb:[-1,1]},
+      props:[FLOOR, {k:'arrow',x1:70,y1:70,x2:78,y2:70}] },
+  ]},
+  { names:['cobra pose','cobra'], title:'Cobra pose', view:[0,60,120,52], steps:[
+    { cap:'Hands under the shoulders, press the chest forward and up',
+      pose:{hip:[68,100], torso:132, head:128, hands:[[46,104],[50,104]], feet:[[106,102],[108,102]]}, props:[FLOOR] },
+  ]},
+  { names:['heel hook','hook laps','toe hook'], title:'Heel hook', view:[30,6,90,106], steps:[
+    { cap:'Hook the heel over a hold at about hip height',
+      pose:{hip:[84,70], torso:80, head:86, hands:[[102,40],[102,44]], feet:[[100,96],[98,62]]},
+      props:[...WALL, {k:'hold',x:102,y:42}, {k:'hold',x:100,y:96}, {k:'hold',x:100,y:60}] },
+    { cap:'Pull with the hamstring so the hips come in toward the wall',
+      pose:{hip:[90,66], torso:80, head:86, hands:[[102,40],[102,44]], feet:[[100,96],[100,60]]},
+      props:[...WALL, {k:'hold',x:102,y:42}, {k:'hold',x:100,y:96}, {k:'hold',x:100,y:60}, {k:'arrow',x1:70,y1:70,x2:82,y2:68}] },
+  ]},
+  { names:['hover hands','hover hand'], title:'Hover hands', view:[30,6,90,106], steps:[
+    { cap:'Hold the hand just above the next hold for about three seconds',
+      pose:{hip:[84,70], torso:80, head:86, hands:[[102,24],[102,46]], feet:[[100,96],[96,100]]},
+      props:[...WALL, {k:'hold',x:102,y:34}, {k:'hold',x:102,y:46}, {k:'hold',x:100,y:96}] },
+    { cap:'Then take it, keeping the body tight and still',
+      pose:{hip:[84,70], torso:80, head:86, hands:[[102,34],[102,46]], feet:[[100,96],[96,100]]},
+      props:[...WALL, {k:'hold',x:102,y:34}, {k:'hold',x:102,y:46}, {k:'hold',x:100,y:96}] },
+  ]},
+  { names:['straight-arm traverse','three-finger sloth','sloth & monkey'], title:'Straight-arm climbing', view:[30,6,90,106], steps:[
+    { cap:'Arms straight, hang off the skeleton and move by turning the hips',
+      pose:{hip:[70,74], torso:78, head:84, hands:[[102,38],[102,42]], feet:[[100,100],[96,104]]},
+      props:[...WALL, {k:'hold',x:102,y:40}, {k:'hold',x:100,y:100}] },
+  ]},
+  { names:['one-leg climb','one-hand traverse'], title:'One-leg climb', view:[30,6,90,106], steps:[
+    { cap:'Keep one foot off the wall and balance over the other',
+      pose:{hip:[84,70], torso:80, head:86, hands:[[102,40],[102,44]], feet:[[100,96],[80,100]]},
+      props:[...WALL, {k:'hold',x:102,y:42}, {k:'hold',x:100,y:96}] },
+  ]},
 ];
 function findIllustration(name){
   if (!name) return null;
@@ -537,6 +631,94 @@ function illustrationHTML(il){
     <div class="illus-strip">${il.steps.map((st, i) => `<figure class="illus-step">${renderIllusFrame(Object.assign({ view: il.view }, st))}
       <figcaption><b>${i + 1}</b> ${escHtml(st.cap)}</figcaption></figure>`).join('')}</div></div>`;
 }
+// One-line cues for the exercises that need one beyond their kind of work. Anything without an entry
+// falls back to a note for its kind, so every exercise opens with something useful.
+const EXERCISE_NOTES = {
+  'Band external rotation':'Elbow pinned to your side at 90 degrees. Turn the forearm outward against the band, slowly, then return.',
+  'Scapular push-ups':'In a plank with straight arms, let the chest sink between the shoulder blades, then push them apart. Only the shoulder blades move.',
+  'Prone Y raises':'Face down, thumbs up, lift the arms in a Y by squeezing between the shoulder blades. Do not arch the back.',
+  'Prone T raises':'Face down, arms out to the sides like a T, lift by squeezing the shoulder blades together.',
+  'Wall angels':'Back, hips and forearms on the wall. Slide the arms up and down, keeping contact the whole way.',
+  'Face pulls (band)':'Pull the band toward the face with the elbows high and wide, finishing with the hands beside the ears.',
+  'Reverse wrist curls':'Forearm on a thigh, palm down. Lift the back of the hand slowly and lower it slowly, with a light weight.',
+  'Wrist pronation-supination (light weight)':'Elbow at your side, hold a light weight. Rotate the palm up, then down, slowly.',
+  'Radial-ulnar deviation (light weight)':'Forearm supported, hold a light weight. Tilt the hand toward the thumb side, then the little-finger side.',
+  'Band wrist extensions':'Forearm supported, palm down, band around the hand. Lift the hand against the band slowly.',
+  'Eccentric wrist extensions (slow lower)':'Lift the hand up with the other hand, then lower it to the count of five on your own.',
+  'Band triceps extensions':'Elbows tucked, straighten the arms against the band, then return slowly.',
+  'Prone cobra':'Face down, lift the chest and arms a few inches and squeeze the shoulder blades. Hold a moment.',
+  'Clamshells':'On your side, knees bent, feet together. Open the top knee without rolling the pelvis back.',
+  'Banded lateral walks':'Band above the knees, small knee bend. Step sideways with control, keeping the toes forward.',
+  'Glute bridges':'On your back, feet flat. Drive the hips up until shoulders, hips and knees line up, then lower slowly.',
+  'Fire hydrants':'On all fours, lift one knee out to the side without twisting the trunk, then lower.',
+  'Bird dog':'On all fours, reach one arm forward and the opposite leg back, keeping the hips level.',
+  'Dead bug':'On your back, arms up and knees over the hips. Lower the opposite arm and leg while the low back stays flat.',
+  'Terminal knee extensions (band)':'Band behind the knee, slight bend. Straighten the knee fully against the band and squeeze the thigh.',
+  'Tibialis raises':'Heels on the floor, back against a wall. Lift the toes toward the shins, then lower.',
+  'Short-foot exercise':'Without curling the toes, draw the ball of the foot toward the heel to lift the arch.',
+  'Single-leg balance':'Stand on one leg, eyes on a fixed point. Keep the hips level and the knee soft.',
+  'Joint circles (ankles/hips/shoulders)':'Slow, full circles at each joint, a few each way. Just enough to feel it warm up.',
+  'Arm circles':'Arms out, small circles growing to large, both directions.',
+  'Leg swings (front-back)':'Hold something for balance and swing the leg freely forward and back, a little higher each swing.',
+  'Leg swings (side-side)':'Hold something for balance and swing the leg across the body and out to the side.',
+  'Hip circles':'Hands on hips, draw big slow circles with the pelvis, then reverse.',
+  'High knees march':'March in place, driving the knees to hip height with an upright chest.',
+  'Band pull-aparts':'Arms straight in front, pull the band apart to chest level by squeezing the shoulder blades.',
+  'Wall slides':'Forearms on the wall, slide them up as you stand tall, keeping the ribs down.',
+  "World's greatest stretch (full combo)":'Long lunge, hands inside the front foot, rotate and reach one arm up, then sit the hips back. Both sides.',
+  'Inchworm to plank':'From standing, walk the hands out to a plank, then walk them back and stand up.',
+  'Animal flow — bear crawl':'Knees an inch off the floor, crawl forward with opposite hand and foot together.',
+  'Finger extensions (rubber band)':'Band around the fingers and thumb. Open the hand against it slowly, then close slowly.',
+  'Wrist curls (health/prehab)':'Light weight, forearm supported. Curl the wrist up and lower slowly, a few light reps.',
+  'Wrist mobility circles':'Fingers interlaced, make slow circles with both wrists in each direction.',
+  'Finger hangs':'Warm up first. Hang from a comfortable edge with shoulders active and stop before the fingers fatigue.',
+  'Side plank hold':'Elbow under the shoulder, hips lifted in one line. Do not let the hips sag.',
+  'Hanging leg raises':'Hang from the bar and lift the legs to hip height without swinging, then lower with control.',
+  'Pigeon pose':'Front shin across the mat, back leg long behind. Fold over the front leg and breathe.',
+  'Thread-the-needle':'On all fours, slide one arm under the other and rest the shoulder and ear on the floor. Rotate back out.',
+  'Cat-cow':'On all fours, round the back, then arch it, moving with your breath.',
+  "Child's pose":'Sit the hips back toward the heels and reach the arms long. Breathe into the back.',
+  'Downward dog':'Hands and feet on the floor, hips high, heels reaching down. Press the chest toward the thighs.',
+  'Couch stretch (hip flexor)':'Back shin up the wall, front foot forward. Tuck the tailbone and stand tall.',
+  '90/90 hip switches':'Sit with both knees bent at 90 degrees, then rotate both legs to the other side, keeping the torso tall.',
+  'Turkish get-up (bodyweight)':'Lying down, roll to the elbow, then hand, lift the hips, step back to a lunge and stand, eyes on the fist.',
+  'Squat-to-stand':'From a deep squat grab the toes, straighten the legs, then drop back down.',
+};
+const KIND_NOTES = {
+  strength:'Controlled reps, smooth up and down. Stop one or two reps before your form breaks.',
+  prehab:'Light and slow: one set of 5 to 10 reps, well short of fatigue. This is for the joints, not a workout.',
+  mobility:'Smooth, easy range. Move into it, do not force it.',
+  stretch:'Hold about 30 seconds each side, breathing slowly. Ease off if anything pinches.',
+  release:'Roll or press slowly for 30 to 60 seconds on tender spots. Stay below sharp pain.',
+  cardio:'A steady effort you could still talk through, with tidy form.',
+  fingers:'Warm up first. Stop at any sharp pain in the fingers or elbows.',
+};
+const KIND_LABEL = { strength:'Strength', prehab:'Prehab', mobility:'Mobility', stretch:'Stretch', release:'Release', cardio:'Cardio', fingers:'Fingers' };
+function illustrationStripHTML(il){
+  return `<div class="illus-strip">${il.steps.map((st, i) => `<figure class="illus-step">${renderIllusFrame(Object.assign({ view: il.view }, st))}
+      <figcaption><b>${i + 1}</b> ${escHtml(st.cap)}</figcaption></figure>`).join('')}</div>`;
+}
+// The in-app explanation for an exercise or drill: what it works, how to do it, the steps drawn out.
+// This replaces sending you to a web search.
+function openExercise(name){
+  if (!name) return;
+  const deck = COACH_DECK_BY_NAME[String(name).trim().toLowerCase()];
+  const meta = exerciseMeta(name);
+  const il = findIllustration(name);
+  const note = deck ? deck.d : (EXERCISE_NOTES[meta ? Object.keys(EXERCISE_META).find(n => n.toLowerCase() === String(name).trim().toLowerCase()) : name] || (meta ? KIND_NOTES[meta.k] : ''));
+  const chips = [];
+  if (deck) deck.cats.forEach(c => chips.push(c));
+  if (meta) { chips.push(meta.r); chips.push(KIND_LABEL[meta.k] || meta.k); }
+  const loads = meta && meta.strains.length ? `<p class="small muted" style="margin:8px 0 0;">Loads: ${escHtml(meta.strains.join(', ').toLowerCase())}.</p>` : '';
+  const html = `<div class="illus"><div class="illus-title">${escHtml(name)}</div>
+    ${chips.length ? `<div class="pillrow" style="margin-bottom:8px;">${chips.map(c => `<span class="plan-badge">${escHtml(c)}</span>`).join('')}</div>` : ''}
+    ${deck ? `<p class="small" style="margin:0 0 6px;"><b>${escHtml(deck.dose)}</b></p>` : ''}
+    ${note ? `<p style="margin:0 0 12px;">${escHtml(note)}</p>` : ''}
+    ${il ? illustrationStripHTML(il) : `<p class="small muted">No illustration for this one yet.</p>`}
+    ${loads}</div>`;
+  App.ui.infoPopup = { html, text: name };
+  App.render();
+}
 function showIllustration(name){
   const il = findIllustration(name);
   if (!il) return;
@@ -544,7 +726,7 @@ function showIllustration(name){
   App.render();
 }
 function howButton(name){
-  return findIllustration(name) ? `<button type="button" class="how-btn" onclick="showIllustration('${escAttr(name)}')">Show steps</button>` : '';
+  return findIllustration(name) ? `<button type="button" class="how-btn" onclick="openExercise('${escAttr(name)}')">Show steps</button>` : '';
 }
 
 // Original 24-item self-assessment (not Horst's wording — see chat).
@@ -1968,7 +2150,7 @@ function pillsHTML(options, selected, onClick, opts){
   return `<div class="pillrow">${options.map(o => {
     const isActive = Array.isArray(selected) ? selected.includes(o) : selected === o;
     const searchBtn = opts.searchable
-      ? `<span onclick="event.stopPropagation(); searchExercise('${escAttr(o)}')" style="margin-left:6px;opacity:.75;cursor:pointer;" title="Search this">&#128269;</span>`
+      ? `<span onclick="event.stopPropagation(); openExercise('${escAttr(o)}')" style="margin-left:6px;opacity:.75;cursor:pointer;" title="How to do it">?</span>`
       : '';
     return `<button type="button" class="${cls}${isActive ? ' active'+altClass : ''}" onclick="${onClick}('${escAttr(o)}')">${o}${searchBtn}</button>`;
   }).join('')}</div>`;
@@ -2015,11 +2197,11 @@ function parsePlanLines(text){
     return { prefix, name: namePart, rest: restPart };
   });
 }
-// In-app version: exercise name is a tappable span that calls searchExercise() via the app's own JS.
+// In-app version: exercise name is a tappable span that opens the app's own explanation.
 function renderPlanWithSearchLinks(text){
   return parsePlanLines(stripPlanTags(text)).map(l => l.name === null
     ? escHtml(l.rest)
-    : escHtml(l.prefix) + `<span class="ex-link" onclick="searchExercise('${escAttr(l.name)}')">${escHtml(l.name)}</span>` + escHtml(l.rest)
+    : escHtml(l.prefix) + `<span class="ex-link" onclick="openExercise('${escAttr(l.name)}')">${escHtml(l.name)}</span>` + escHtml(l.rest)
   ).join('\n');
 }
 // Standalone version: real <a href> links, no JS dependency — works in an opened tab, a saved
@@ -2361,7 +2543,7 @@ function renderPlanEditable(text, interactive){
     return `<div class="exercise-card" style="border-left-color:var(--cat-${category})">
       <div class="exercise-card-top">
         <div class="exercise-card-main">
-          <div class="exercise-card-name">${namePart ? `<span class="ex-link" onclick="searchExercise('${escAttr(namePart)}')">${nameHtml}</span>` : nameHtml}</div>
+          <div class="exercise-card-name">${namePart ? `<span class="ex-link" onclick="openExercise('${escAttr(namePart)}')">${nameHtml}</span>` : nameHtml}</div>
           ${restPart.trim() ? `<div class="exercise-card-detail">${escHtml(restPart.trim())}</div>` : ''}
           ${namePart ? howButton(namePart) : ''}
         </div>
@@ -2387,7 +2569,7 @@ function renderSectionCarousel(text){
       <div class="section-card-title">${escHtml(sec.title)}${sec.badge ? ` <span class="plan-badge">${escHtml(sec.badge)}</span>` : ''}</div>
       ${sec.plain.map(p => `<div class="plan-plain">${escHtml(p)}</div>`).join('')}
       ${sec.items.map(it => `<div class="section-card-item">
-        <div class="exercise-card-name"><span class="ex-link" onclick="searchExercise('${escAttr(it.name)}')">${escHtml(it.name)}</span></div>
+        <div class="exercise-card-name"><span class="ex-link" onclick="openExercise('${escAttr(it.name)}')">${escHtml(it.name)}</span></div>
         ${it.detail ? `<div class="exercise-card-detail">${escHtml(it.detail)}</div>` : ''}
         ${howButton(it.name)}
       </div>`).join('')}
@@ -3338,6 +3520,18 @@ function settingsSection(id, title, body, info){
   </div>`;
 }
 function toggleSettingsSection(id){ App.ui.settingsSections[id] = !App.ui.settingsSections[id]; App.render(); }
+function renderLibrary(){
+  const names = Object.keys(EXERCISE_META);
+  const withIl = names.filter(n => findIllustration(n)).length;
+  const deckWith = COACH_DECK.filter(x => findIllustration(x.t)).length;
+  const groups = {};
+  names.forEach(n => { const st = EXERCISE_META[n].style; (groups[st] = groups[st] || []).push(n); });
+  return `<p class="small muted" style="margin:0 0 10px;">Illustrated: ${withIl} of ${names.length} exercises, ${deckWith} of ${COACH_DECK.length} drills.</p>` +
+    Object.keys(groups).map(st => `<div style="padding:8px 0;border-top:1px solid var(--border);">
+      <div class="small muted" style="margin-bottom:6px;">${escHtml(st)}</div>
+      <div class="pillrow">${groups[st].map(n => `<button type="button" class="pill sm" onclick="openExercise('${escAttr(n)}')">${escHtml(n)}${findIllustration(n) ? ' &#10003;' : ''}</button>`).join('')}</div>
+    </div>`).join('');
+}
 function renderBenchmarkHistory(){
   if (!App.benchmarks.length) return '<p class="small muted">No benchmarks yet. Run them from the button above, or when a taper week prompts you.</p>';
   return BENCHMARKS.map(b => {
@@ -3382,6 +3576,7 @@ function renderSettings(){
     </div>
     <button class="btn btn-ghost" onclick="resetWeeklyGoals()">Reset goals to defaults</button>`,
     "Minutes per week you're aiming for in each area. These set the dashed ring on Home's chart and the numbers you see when you tap an axis. Taper weeks scale them down automatically.")}
+  ${settingsSection('library', 'Exercise library', renderLibrary(), 'Every exercise and drill the app knows, with how to do it and, where one exists, a drawn illustration. A tick marks the ones with illustrations.')}
   ${settingsSection('deck', 'Coach deck', COACH_DECK.map(x => `<div style="padding:8px 0;border-top:1px solid var(--border);">
       <div style="font-weight:600;font-size:0.85rem;">${escHtml(x.t)} <span class="small muted" style="font-weight:400;">${escHtml(x.dose)}</span></div>
       <div class="small muted" style="margin-top:2px;">${escHtml(x.d)}</div>
@@ -3835,7 +4030,7 @@ window.toggleStopwatch = toggleStopwatch; window.resetStopwatch = resetStopwatch
 window.removePlanLine = removePlanLine; window.movePlanLine = movePlanLine; window.swapPlanLine = swapPlanLine;
 window.toggleSettingsSection = toggleSettingsSection; window.toggleIssues = toggleIssues; window.toggleAddType = toggleAddType; window.addRecentGrade = addRecentGrade; window.changeClimbCount = changeClimbCount; window.showFullLogForm = showFullLogForm; window.togglePlanEditing = togglePlanEditing; window.toggleShareMenu = toggleShareMenu; window.toggleLogMore = toggleLogMore; window.autoGrow = autoGrow;
 window.cancelGeneration = cancelGeneration;
-window.showIllustration = showIllustration; window.ILLUSTRATIONS = ILLUSTRATIONS; window.COACH_DECK = COACH_DECK; window.COACH_DECK_BY_NAME = COACH_DECK_BY_NAME; window.EXERCISE_META = EXERCISE_META;
+window.openExercise = openExercise; window.EXERCISE_NOTES = EXERCISE_NOTES; window.showIllustration = showIllustration; window.ILLUSTRATIONS = ILLUSTRATIONS; window.COACH_DECK = COACH_DECK; window.COACH_DECK_BY_NAME = COACH_DECK_BY_NAME; window.EXERCISE_META = EXERCISE_META;
 window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
 window.EXERCISE_LIBRARY = EXERCISE_LIBRARY; window.WORKOUT_STYLES = WORKOUT_STYLES;
 window.FOCUS_AREAS = FOCUS_AREAS; window.ADHERENCE_OPTIONS = ADHERENCE_OPTIONS;

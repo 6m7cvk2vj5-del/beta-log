@@ -43,8 +43,18 @@
 
   var settings = { apiKey: '', cycleType: '3-2-1', cycleStartDate: iso(9), gradeIndoor: '5.10c', gradeOutdoor: '5.10a', fontSize: 'medium', theme: 'light', weeklyTargets: {} };
 
-  var assessments = [{ id: 'a1', date: iso(30), scores: { mental: 3.1, technique: 2.6, physical: 3.4 },
-    answers: [3,2,3,3,2,3,3,2,4,3,3,3,3,2,4,3,3,3,3,2,3,3,2,4], gradeIndoor: '5.10b', gradeOutdoor: '5.10a' }];
+  var assessments = [
+    { id: 'a0', date: iso(70), scores: { mental: 3.1, technique: 2.6, physical: 3.4 }, answers: [3,2,3,3,2,3,3,2,4,3,3,3,3,2,4,3,3,3,3,2,3,3,2,4], gradeIndoor: '5.10b', gradeOutdoor: '5.10a' },
+    { id: 'a1', date: iso(25), version: 2, areas: { strength: 3.33, mobility: 1.67, coordination: 2.5, awareness: 2.5 },
+      points: { strength: 1, mobility: 2.5, coordination: 1.5, awareness: 1.5 }, picksCount: 3,
+      picks: [], gradeIndoor: '5.10c', gradeOutdoor: '5.10a' }
+  ];
+  var benchmarks = [
+    { id: 'b1', date: iso(50), test: 'pushups', value: 16 }, { id: 'b2', date: iso(25), test: 'pushups', value: 19 },
+    { id: 'b3', date: iso(50), test: 'sideplank', value: 32 }, { id: 'b4', date: iso(25), test: 'sideplank', value: 41 },
+    { id: 'b5', date: iso(25), test: 'wallangel', value: 12 }, { id: 'b6', date: iso(25), test: 'deadhang', value: 48 },
+    { id: 'b7', date: iso(25), test: 'balance', value: 22 }
+  ];
 
   var plan = [
     '### Blood flow — 4 min [cardio]',
@@ -78,6 +88,7 @@
     localStorage.setItem('t4c_entries', JSON.stringify(entries));
     localStorage.setItem('t4c_settings', JSON.stringify(settings));
     localStorage.setItem('t4c_assessments', JSON.stringify(assessments));
+    localStorage.setItem('t4c_benchmarks', JSON.stringify(benchmarks));
     localStorage.setItem('t4c_last_plan', JSON.stringify(lastPlan));
     localStorage.setItem('t4c_swipe_hint_shown', '1');
   } catch (e) { return; }
