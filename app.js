@@ -837,7 +837,7 @@ const LS = {
 };
 
 const App = {
-  settings: { apiKey:'', cycleType:'3-2-1', cycleStartDate: todayISO(), gradeIndoor:'', gradeOutdoor:'', fontSize:'medium', theme:'light', weeklyTargets:{} },
+  settings: { apiKey:'', cycleType:'3-2-1', cycleStartDate: todayISO(), gradeIndoor:'', gradeOutdoor:'', fontSize:'medium', theme:'light', weeklyTargets:{}, minClimbs:2 },
   entries: [],
   _entriesVersion: 0, // bumped by saveEntries(); invalidates the day-aggregation caches
   assessments: [],
@@ -961,7 +961,7 @@ function freshLogDraft(){
 function freshAskDraft(){
   return { minutes:60, feeling:3, sessionTypes:['Climbing'], focusMode:'weak', focusPick:'', focusOther:'', focusSecondary:'',
     sessionStyle:'play', drillCategory:'', mobilityFocus:[], routineStyle:'', mentalFocus:false,
-    climbDiscipline:'', climbLocation:'' };
+    climbDiscipline:'', climbLocation:'', fingerDay:null, catchUp:null };
 }
 const MOBILITY_FOCUS_OPTIONS = ['Hips','Shoulders','Thoracic spine/back','Ankles/feet','Wrists','Full body'];
 const FINGERS_ROUTINE_OPTIONS = ['HIT System (max-strength)','Repeaters','Hangboard ladders','Coach\'s choice'];
@@ -1236,8 +1236,105 @@ function applyQuickStart(label){
   d.routineStyle = '';
   App.render();
 }
+// A short read of the week and what today's session will keep, with the two overrides.
+function renderSessionModelNote(){
+  const m = computeSessionModel();
+  const d = App.ui.askDraft;
+  const status = `Climbing sessions this week: <b>${m.climbDays}</b> (at least ${m.min}).` + (m.missed.length ? ` Not yet this week: ${m.missed.map(x => x === 'antag' ? 'antagonist' : x).join(', ')}.` : '');
+  const overrides = [];
+  if (m.single) overrides.push(`<button type="button" class="pill sm" onclick="setCatchUp(true)">Add catch-up work anyway</button>`);
+  else if (d.catchUp === true) overrides.push(`<button type="button" class="pill sm" onclick="setCatchUp(null)">Back to climbing and health only</button>`);
+  if (m.phase === 'Max Strength & Power') overrides.push(`<button type="button" class="pill sm${m.fingerDay ? ' active' : ''}" onclick="setFingerDay(${m.fingerDay ? 'false' : 'true'})">Heavy fingers day</button>`);
+  return `<div class="field" style="margin-top:4px;padding:10px 12px;background:var(--surface2);border-radius:10px;">
+    <p class="small" style="margin:0;">${status}</p>
+    <p class="small muted" style="margin:6px 0 0;">Today keeps: ${m.components.map(c => escHtml(SESSION_COMPONENT_LABELS[c].toLowerCase())).join(', ')}.</p>
+    ${m.notes.map(n => `<p class="small" style="margin:6px 0 0;">${escHtml(n)}</p>`).join('')}
+    ${overrides.length ? `<div class="pillrow" style="margin-top:8px;">${overrides.join('')}</div>` : ''}
+  </div>`;
+}
+function setCatchUp(v){ App.ui.askDraft.catchUp = v; App.render(); }
+function setFingerDay(v){ App.ui.askDraft.fingerDay = v; App.render(); }
 function toggleAskMore(){ App.ui.askMoreOpen = !App.ui.askMoreOpen; App.render(); }
 function setAskStep(n){ App.ui.askStep = n; App.render(); window.scrollTo(0,0); }
+
+// ---- Climbing session model ----
+// What this week has already covered (Monday to Sunday containing today), from the log.
+function getWeekState(){
+  const dates = getWeekDates(todayISO());
+  const today = todayISO();
+  const byDate = aggregateByDay(App.entries);
+  const days = dates.filter(d => d <= today).map(d => byDate[d]).filter(Boolean);
+  const climbDays = days.filter(d => classifyDay(d) === 'Climb').length;
+  const sum = f => days.reduce((a, d) => a + (d[f] || 0), 0);
+  const entries = days.flatMap(d => d.entries);
+  const done = {
+    fingers: sum('timeFingers') > 0,
+    heavyFingers: entries.some(e => (Number(e.timeFingers) || 0) >= 15),
+    strength: sum('timeStrength') + sum('timeCore') > 0,
+    antagonist: sum('timeAntag') > 0 || computePrehabCoverage(App.entries).covered.length >= 5,
+    mobility: sum('timeMobility') + sum('timeFlexibility') > 0,
+    maxEffort: entries.some(e => e.intensity === 'Max effort' || arr(e.dayTypes).includes('Power') || arr(e.dayTypes).includes('Project')),
+    technique: entries.some(e => arr(e.dayTypes).includes('Skills/Technique')),
+  };
+  const daysLeft = dates.filter(d => d >= today).length; // including today
+  // Sessions per week over the last three full weeks, to tell a normal week from a thin one.
+  const weekCounts = [];
+  for (let k = 1; k <= 3; k++) {
+    const m = new Date(dates[0] + 'T00:00:00'); m.setDate(m.getDate() - 7 * k);
+    const wd = getWeekDates(toLocalISO(m));
+    weekCounts.push(wd.filter(d => byDate[d] && classifyDay(byDate[d]) === 'Climb').length);
+  }
+  return { climbDays, done, daysLeft, weekCounts };
+}
+const SESSION_COMPONENT_LABELS = {
+  warmup:'Warmup, prehab and finger activation', technique:'Technique drills inside easy climbing',
+  main:'Main climbing', techOnly:'Technique-only climbing (no limit efforts)', fingersHeavy:'Heavy finger training',
+  fingersHealth:'Finger health circuit', strength:'Strength and core', antag:'Antagonist and stabilizer work', cooldown:'Cooldown with hip mobility',
+};
+// Decides which components a climbing session keeps, from the time available, the phase and what the
+// week has already covered. Cuts come from the bottom of the priority list; the warmup (with finger
+// activation), the main climbing and the cooldown are never cut. A heavy-fingers day replaces limit
+// climbing with technique and puts the hangs after it. When the week looks like it will hold only this
+// one session, nothing is stacked on: climbing and health only.
+function computeSessionModel(draft){
+  const d = draft || App.ui.askDraft;
+  const wk = getWeekState();
+  const min = Math.max(1, Number(App.settings.minClimbs) || 2);
+  const phase = getCycleState(App.settings).phaseName;
+  const powerBlock = phase === 'Max Strength & Power';
+  const minutes = d.minutes;
+  const typical = wk.weekCounts.slice().sort((a, b) => a - b)[1]; // median of the last three weeks
+  // "Only session" is inferred from the log: nothing logged yet this week and few days left, or a
+  // run of weeks with a single climb. You can override it on the Ask screen.
+  const inferredSingle = wk.climbDays === 0 && (wk.daysLeft <= 3 || typical <= 1);
+  const single = d.catchUp === true ? false : (d.catchUp === false ? true : inferredSingle);
+  const fingerDayAuto = powerBlock && !wk.done.heavyFingers && !single;
+  const fingerDay = d.fingerDay === null || d.fingerDay === undefined ? fingerDayAuto : !!d.fingerDay;
+  const missed = [];
+  if (!wk.done.fingers && !fingerDay) missed.push('fingers');
+  if (!wk.done.strength) missed.push('strength');
+  if (!wk.done.antagonist) missed.push('antag');
+  const comps = ['warmup'];
+  if (fingerDay) comps.push('techOnly');
+  else { if (minutes >= 45) comps.push('technique'); comps.push('main'); }
+  if (fingerDay) comps.push('fingersHeavy');
+  const extras = [];
+  if (!single && !fingerDay) {
+    // catch-up stacking, in priority order, as many as the time allows (at most two)
+    const order = powerBlock ? ['fingers', 'strength', 'antag'] : ['strength', 'fingers', 'antag'];
+    const want = order.filter(x => missed.includes(x));
+    const slots = minutes >= 90 ? 2 : (minutes >= 60 ? 1 : 0);
+    want.slice(0, slots).forEach(x => extras.push(x));
+    extras.forEach(x => comps.push(x === 'fingers' ? 'fingersHealth' : x));
+  }
+  comps.push('cooldown');
+  const notes = [];
+  if (single) notes.push('This looks like your only session this week, so the plan sticks to climbing and health.');
+  if (fingerDay) notes.push('Heavy fingers day: technique only, no limit climbing, then heavy hangs.');
+  const left = Math.max(0, min - wk.climbDays);
+  return { components: comps, single, fingerDay, missed, extras, notes, climbDays: wk.climbDays, min, left, daysLeft: wk.daysLeft, phase,
+    behind: left > 0 && wk.daysLeft <= left + 1 };
+}
 
 // ---- Pattern detection (simple, transparent heuristics, day-based not entry-based) ----
 function detectPatterns(entries){
@@ -1891,10 +1988,11 @@ async function askClaude(feedback){
       "STRUCTURE REQUIREMENT, only when 'Climbing' IS among the requested session types: always include, in this " +
       "order — (1) the off-wall warmup, built as the WARMUP STRUCTURE below (not on-wall climbing), (2) finger/" +
       "wrist/forearm/shoulder health work, which is the LAST stage of the warmup and always comes before any " +
-      "climbing, (3) light easy climbing as a " +
-      "second warmup phase, (4) the main climbing volume, (5) some near-limit/limit climbing, (6) " +
-      "climbing-related strength or power exercise, (7) hip mobility/stability work and cooldown/stabilizer " +
-      "work. That numbered list describes the STRUCTURE conceptually — it is not a template for output bullets. " +
+      "climbing, (3) light easy climbing as a second warmup phase, carrying technique drills from the coach " +
+      "deck, (4) the main climbing: near-limit/max-effort in Max Strength & Power, steady volume in Skill & " +
+      "Stamina, interval work in Power-Endurance, (5) finger training AFTER the climbing: heavy hangs on a " +
+      "heavy-fingers day, otherwise a short finger-health circuit, (6) strength, antagonist or core work, " +
+      "(7) hip mobility/stability work and cooldown. That numbered list describes the STRUCTURE conceptually — it is not a template for output bullets. " +
       "Pieces (2) and (7) cover two anatomically unrelated regions — keep them clearly apart: (2) is the " +
       "grip-and-pull overuse-prevention side (hangboard health protocols, finger extensions, wrist mobility, " +
       "shoulder external rotation), and (7) includes hip mobility/stability, a completely different region tied " +
@@ -1905,7 +2003,7 @@ async function askClaude(feedback){
       "a single bullet point summarizing the whole piece ('- Volume: climb 8-10 problems...' is wrong — a bullet is " +
       "always one specific, tappable thing, never a paragraph-level description of an entire phase). If a piece is " +
       "just a general instruction rather than a list of specific things, write it as a plain sentence under its " +
-      "header, not as a bulleted list item. Never drop a piece, but vary the AMOUNT of each — how much climbing, how much antagonist/stabilizer, " +
+      "header, not as a bulleted list item. Include exactly the components listed under 'Session components' in the request below, in that order, no more and no fewer, and vary the AMOUNT of each — how much climbing, how much antagonist/stabilizer, " +
       "how much cardio — based on the phase, time budget, and the patterns/weekly-rhythm notes below. The finger " +
       "and forearm piece (2) is NEVER optional and never gets cut for time, even on a short " +
       "session — climbing is finger/forearm-dominant, and skipping this is exactly how those get overdeveloped and " +
@@ -1937,6 +2035,14 @@ async function askClaude(feedback){
       "Max Strength & Power'), since that context should visibly shape the prescription. The HIT System (max-strength " +
       "hangboard protocol) is a legitimate option to recommend here when it fits the phase and their level — feel free " +
       "to suggest it, not just repeaters.\n\n" +
+      "SESSION MODEL, for any session that includes Climbing: the request lists 'Session components' decided " +
+      "from the time available, the phase and what this week has already covered. Use exactly those, in that " +
+      "order. The warmup (with finger activation), the main climbing and the cooldown are always present. On a " +
+      "HEAVY-FINGERS DAY there is no limit or max-effort climbing at all: warmup, technique-only climbing at " +
+      "submaximal effort, then heavy finger training (max-strength hangs or the HIT System) last, then cooldown. " +
+      "When the request says this is probably the only session this week, do not try to fix their weak points: " +
+      "favour good climbing and joint health, and keep the plan simple. Never stack catch-up work onto a " +
+      "heavy-fingers day.\n\n" +
       "WARMUP STRUCTURE, whenever the plan includes a warmup (climbing or not): progress from small to big in " +
       "this order, each stage as its own section header with its own tag — (a) 'Blood flow' [cardio]: 2-3 items, " +
       "joint circles always included as the constant anchor plus one rotating item (jumping jacks, skipping, jog, " +
@@ -2000,6 +2106,11 @@ async function askClaude(feedback){
       `Body regions not yet touched by logged work in the last 7 days (use these for prehab): ${computePrehabCoverage(App.entries).missing.join(', ') || 'all covered'}\n` +
       `Weak-point profile (background context regardless of today's priority-focus choice): ${weakPointLine}\n` +
       (drillLine ? `Climbing portion request: ${drillLine}\n` : '') +
+      (d.sessionTypes.includes('Climbing') ? (() => { const m = computeSessionModel(); return `Session components, in order, for today (use exactly these): ${m.components.map(c => SESSION_COMPONENT_LABELS[c]).join(' > ')}.\n` +
+        `Week so far: ${m.climbDays} climbing session${m.climbDays === 1 ? '' : 's'} (they want at least ${m.min}); ${m.daysLeft} day${m.daysLeft === 1 ? '' : 's'} left including today. Not yet covered this week: ${m.missed.length ? m.missed.join(', ') : 'nothing'}.\n` +
+        (m.single ? `This looks like their only session this week: climbing and health only, no catch-up stacking.\n` : '') +
+        (m.fingerDay ? `Heavy-fingers day: technique-only climbing (no limit efforts), then heavy finger training after it.\n` : '') +
+        (m.behind ? `They are behind on climbing sessions for the week: favour climbing over exercise-only work.\n` : ''); })() : '') +
       (d.sessionTypes.includes('Climbing') ? `Coach deck — pick the easy-climbing warmup and any technique/limit-climbing drills from this list by exact name, and use the given dose and description rather than inventing a drill; at least one warmup-category drill should be in the easy climbing, and when the person asked for play, favour the play entries:\n${deckText}\n` : '') + `\n` +
       `Detected patterns: ${flags.length ? flags.join(' | ') : 'none flagged'}\n\n` +
       `Recent log, per calendar day with every field entered that day (most recent last):\n${recent}\n\n` +
@@ -3108,6 +3219,7 @@ function renderAsk(){
       ${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setAskFeeling')}
       <div class="scale-caption" style="margin-top:2px;"><span>1 = flat</span><span>5 = dialed</span></div>
     </div>
+    ${d.sessionTypes.includes('Climbing') ? renderSessionModelNote() : ''}
     <button class="btn btn-primary" onclick="setAskStep(2)" ${d.sessionTypes.length ? '' : 'disabled'}>Next: details</button>
     <button class="btn btn-ghost" style="margin-top:8px;" onclick="askClaude()" ${(App.ui.planLoading || !d.sessionTypes.length) ? 'disabled' : ''}>${App.ui.planLoading ? 'Thinking…' : 'Skip details, get the plan'}</button>
     ${App.ui.planError ? `<p class="small" style="color:var(--red);margin-top:8px;">${escHtml(App.ui.planError)}</p>` : ''}
@@ -3556,6 +3668,9 @@ function renderSettings(){
     </div>
     <div class="field"><label>Cycle start date</label>
       <input type="date" value="${s.cycleStartDate}" oninput="App.settings.cycleStartDate=this.value">
+    </div>
+    <div class="field"><label>Climbing sessions per week, at least</label>
+      <input type="number" inputmode="numeric" min="1" max="7" value="${s.minClimbs || 2}" oninput="App.settings.minClimbs = Math.max(1, Math.min(7, Number(this.value) || 2))">
     </div>
     <div class="row2">
       <div class="field"><label>Indoor grade</label>
@@ -4055,7 +4170,7 @@ window.toggleLogWorkoutStyle = toggleLogWorkoutStyle; window.toggleLogExercise =
 window.deleteEntry = deleteEntry; window.openPlanAsPage = openPlanAsPage; window.savePlanAsImage = savePlanAsImage;
 window.saveGeneratedPlanToLog = saveGeneratedPlanToLog; window.searchExercise = searchExercise; window.setLogAdherence = setLogAdherence;
 window.showLastPlan = showLastPlan;
-window.toggleAskMore = toggleAskMore; window.applyQuickStart = applyQuickStart; window.setAskStep = setAskStep; window.toggleTimeOther = toggleTimeOther; window.setClimbDiscipline = setClimbDiscipline; window.setClimbPlace = setClimbPlace; window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
+window.setCatchUp = setCatchUp; window.setFingerDay = setFingerDay; window.computeSessionModel = computeSessionModel; window.toggleAskMore = toggleAskMore; window.applyQuickStart = applyQuickStart; window.setAskStep = setAskStep; window.toggleTimeOther = toggleTimeOther; window.setClimbDiscipline = setClimbDiscipline; window.setClimbPlace = setClimbPlace; window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
 window.toggleMentalFocus = toggleMentalFocus;
 window.sharePlan = sharePlan; window.toggleMobilityFocus = toggleMobilityFocus; window.toLocalISO = toLocalISO;
 window.setRoutineStyle = setRoutineStyle;
