@@ -75,15 +75,38 @@ Small to big, the same every session, only the exercises inside it rotate:
 
 One play item is included somewhere in the warmup, and some prehab is saved for the cooldown.
 
-## Climbing session structure the plan asks for
+## Climbing session model
 
-1. Off-wall warmup (the skeleton above)
-2. Finger, wrist and forearm health, last part of the warmup
-3. Light easy climbing
-4. Main climbing volume
-5. Near-limit climbing
-6. Climbing-related strength or power
-7. Hip mobility and stability, then cooldown
+A climbing session is built from these components, in this order:
+
+1. **Warmup**: blood flow, prehab, movement pattern, then finger activation last
+2. **Technique drills**, carried inside the easy climbing
+3. **Main climbing**: max effort in Max Strength & Power, volume in Skill & Stamina, intervals in Power-Endurance
+4. **Fingers, after climbing**: heavy hangs only on a heavy-fingers day, otherwise a short finger-health circuit
+5. **Strength, antagonist and core work**
+6. **Cooldown** with hip mobility
+
+### What stays at each length
+
+Cuts come from the bottom of the list. The warmup (with finger activation), the main climbing and the cooldown are never cut.
+
+| Minutes | Kept |
+|---|---|
+| 30 | warmup, main climbing, cooldown |
+| 45 | + technique drills inside the easy climbing |
+| 60 | + one catch-up item (fingers or strength, whichever is missed this week) |
+| 90 | + a second catch-up item |
+
+### Heavy-fingers day
+
+No limit or max-effort climbing. Warmup, technique-only climbing at submaximal effort, then heavy finger training, then cooldown. In the Max Strength & Power phase there is at least one of these per week; the app suggests it until one is logged.
+
+### Weekly rules
+
+- You set the least number of climbing sessions per week (default 2).
+- Missed components this week (technique, max effort, fingers, strength, antagonist/prehab, mobility) are added to the next session within its time budget, at most two extras, in priority order.
+- If the log suggests this is the only session of the week (nothing logged yet and few days left, or recent weeks have had one climb), nothing is stacked on: climbing and health only. You can override this on the Ask screen.
+- If you are behind on the weekly minimum with few days left, climbing is favoured over exercise-only sessions.
 
 ## Profile (four areas)
 
