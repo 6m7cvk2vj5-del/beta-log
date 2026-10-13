@@ -1,4 +1,4 @@
-/* Chalk Notes — standalone training coach app
+/* Beta Log — standalone training coach app
    Data lives in localStorage only. AI calls go straight to Anthropic's API
    using your own key (stored locally, never written into this file). */
 
@@ -1262,9 +1262,9 @@ function clearPainFlag(){
 // where that's not supported (most desktop browsers), fall back to copying to the clipboard.
 async function sharePlan(){
   if (!App.ui.planText) return;
-  const text = `Chalk Notes — ${todayISO()}\n\n${stripPlanTags(App.ui.planText)}`;
+  const text = `Beta Log — ${todayISO()}\n\n${stripPlanTags(App.ui.planText)}`;
   if (navigator.share) {
-    try { await navigator.share({ title: 'Chalk Notes plan', text }); return; }
+    try { await navigator.share({ title: 'Beta Log plan', text }); return; }
     catch (e) { if (e && e.name === 'AbortError') return; /* user cancelled the share sheet */ }
   }
   try {
@@ -1279,7 +1279,7 @@ function openPlanAsPage(){
   const body = linkifyPlanToHTML(stripPlanTags(App.ui.planText));
   const c = themeColors();
   const doc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chalk Notes — ${todayISO()}</title>
+<title>Beta Log — ${todayISO()}</title>
 <style>
   body{background:${c.bg};color:${c.text};font-family:-apple-system,BlinkMacSystemFont,'IBM Plex Sans',sans-serif;
     max-width:600px;margin:0 auto;padding:24px 18px;line-height:1.6;white-space:pre-wrap;font-size:15px;}
@@ -1288,7 +1288,7 @@ function openPlanAsPage(){
   a{color:${c.gold};text-decoration:underline;text-decoration-style:dotted;}
   a:active{color:${c.teal};}
 </style></head><body>
-<h1>Chalk Notes — Today's Plan</h1>
+<h1>Beta Log — Today's Plan</h1>
 <p class="sub">${todayISO()} &middot; tap any underlined exercise to search it</p>
 ${body}
 </body></html>`;
@@ -1321,13 +1321,13 @@ function savePlanAsImage(){
   const COLORS_JS = themeColors();
   ctx.fillStyle = COLORS_JS.bg; ctx.fillRect(0,0,width,height);
   ctx.fillStyle = COLORS_JS.gold; ctx.font = 'bold 18px sans-serif';
-  ctx.fillText('Chalk Notes — ' + todayISO(), padding, padding + 4);
+  ctx.fillText('Beta Log — ' + todayISO(), padding, padding + 4);
   ctx.fillStyle = COLORS_JS.text; ctx.font = fontSize + 'px monospace';
   lines.forEach((line, i) => { ctx.fillText(line, padding, padding + lineHeight*2 + i*lineHeight); });
   canvas.toBlob(blob => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'chalk-notes-plan-' + todayISO() + '.png';
+    a.href = url; a.download = 'beta-log-plan-' + todayISO() + '.png';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   });
@@ -3351,7 +3351,7 @@ function exportData(){
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = 'chalk-notes-export-' + todayISO() + '.json';
+  a.href = url; a.download = 'beta-log-export-' + todayISO() + '.json';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
   App.toast('Exported — check your downloads');

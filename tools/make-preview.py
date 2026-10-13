@@ -20,7 +20,7 @@ style = re.search(r'<style>.*?</style>', html, re.S).group(0)
 body = re.search(r'<body>(.*?)</body>', html, re.S).group(1)
 body = re.sub(r'\s*<script src="app\.js"></script>\s*', '\n', body)
 
-page = ('<meta charset="UTF-8">\n<title>Chalk Notes Preview</title>\n' + style + '\n' + body.strip() + '\n'
+page = ('<meta charset="UTF-8">\n<title>Beta Log Preview</title>\n' + style + '\n' + body.strip() + '\n'
         '<script src="seed.js"></script>\n<script src="app.js"></script>\n')
 (out / 'index.html').write_text(page)
 shutil.copyfile(root / 'app.js', out / 'app.js')
