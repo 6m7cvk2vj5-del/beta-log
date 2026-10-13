@@ -133,8 +133,26 @@ tsMd += `## Warmup skeleton\n\nSmall to big, the same every session, only the ex
   `3. **Movement pattern** (mobility): one coordinated compound movement, e.g. world's greatest stretch.\n` +
   `4. **Finger activation** (fingers): last, only when the session includes climbing or fingers.\n\n` +
   `One play item is included somewhere in the warmup, and some prehab is saved for the cooldown.\n\n`;
-tsMd += `## Climbing session structure the plan asks for\n\n` +
-  `1. Off-wall warmup (the skeleton above)\n2. Finger, wrist and forearm health, last part of the warmup\n3. Light easy climbing\n4. Main climbing volume\n5. Near-limit climbing\n6. Climbing-related strength or power\n7. Hip mobility and stability, then cooldown\n\n`;
+tsMd += `## Climbing session model\n\n` +
+  `A climbing session is built from these components, in this order:\n\n` +
+  `1. **Warmup**: blood flow, prehab, movement pattern, then finger activation last\n` +
+  `2. **Technique drills**, carried inside the easy climbing\n` +
+  `3. **Main climbing**: max effort in Max Strength & Power, volume in Skill & Stamina, intervals in Power-Endurance\n` +
+  `4. **Fingers, after climbing**: heavy hangs only on a heavy-fingers day, otherwise a short finger-health circuit\n` +
+  `5. **Strength, antagonist and core work**\n` +
+  `6. **Cooldown** with hip mobility\n\n` +
+  `### What stays at each length\n\n` +
+  `Cuts come from the bottom of the list. The warmup (with finger activation), the main climbing and the cooldown are never cut.\n\n` +
+  `| Minutes | Kept |\n|---|---|\n| 30 | warmup, main climbing, cooldown |\n| 45 | + technique drills inside the easy climbing |\n` +
+  `| 60 | + one catch-up item (fingers or strength, whichever is missed this week) |\n| 90 | + a second catch-up item |\n\n` +
+  `### Heavy-fingers day\n\n` +
+  `No limit or max-effort climbing. Warmup, technique-only climbing at submaximal effort, then heavy finger training, then cooldown. ` +
+  `In the Max Strength & Power phase there is at least one of these per week; the app suggests it until one is logged.\n\n` +
+  `### Weekly rules\n\n` +
+  `- You set the least number of climbing sessions per week (default 2).\n` +
+  `- Missed components this week (technique, max effort, fingers, strength, antagonist/prehab, mobility) are added to the next session within its time budget, at most two extras, in priority order.\n` +
+  `- If the log suggests this is the only session of the week (nothing logged yet and few days left, or recent weeks have had one climb), nothing is stacked on: climbing and health only. You can override this on the Ask screen.\n` +
+  `- If you are behind on the weekly minimum with few days left, climbing is favoured over exercise-only sessions.\n\n`;
 tsMd += `## Profile (four areas)\n\n${D.AREAS.map(a => `- **${a.label}**: ${D.AREA_HELP[a.key]}`).join('\n')}\n\n` +
   `Each check-in is six comparisons (one per pair of areas): you pick which statement holds you back more. Example statements:\n\n` +
   D.AREAS.map(a => `**${a.label}**\n\n${D.AREA_STATEMENTS[a.key].map(t => `- ${t}`).join('\n')}\n`).join('\n') + '\n';
