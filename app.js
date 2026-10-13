@@ -4030,6 +4030,8 @@ window.toggleStopwatch = toggleStopwatch; window.resetStopwatch = resetStopwatch
 window.removePlanLine = removePlanLine; window.movePlanLine = movePlanLine; window.swapPlanLine = swapPlanLine;
 window.toggleSettingsSection = toggleSettingsSection; window.toggleIssues = toggleIssues; window.toggleAddType = toggleAddType; window.addRecentGrade = addRecentGrade; window.changeClimbCount = changeClimbCount; window.showFullLogForm = showFullLogForm; window.togglePlanEditing = togglePlanEditing; window.toggleShareMenu = toggleShareMenu; window.toggleLogMore = toggleLogMore; window.autoGrow = autoGrow;
 window.cancelGeneration = cancelGeneration;
+window.DOCS_DATA = { PHASE_GUIDANCE, KIND_NOTES, KIND_LABEL, WORKOUT_STYLES, STYLE_META, WEEKLY_TEMPLATE, TAPER_TEMPLATE, DAY_NAMES, WEEKLY_TARGETS,
+  TAPER_WEEKLY_TARGETS, PREHAB_REGIONS, AREAS, AREA_HELP, AREA_STATEMENTS, BENCHMARKS, BREAKDOWN_CATEGORY, DRILL_LIBRARY, CLIMBING_BANK_STYLES };
 window.openExercise = openExercise; window.EXERCISE_NOTES = EXERCISE_NOTES; window.showIllustration = showIllustration; window.ILLUSTRATIONS = ILLUSTRATIONS; window.COACH_DECK = COACH_DECK; window.COACH_DECK_BY_NAME = COACH_DECK_BY_NAME; window.EXERCISE_META = EXERCISE_META;
 window.DRILL_LIBRARY = DRILL_LIBRARY; window.SESSION_TYPE_OPTIONS = SESSION_TYPE_OPTIONS;
 window.EXERCISE_LIBRARY = EXERCISE_LIBRARY; window.WORKOUT_STYLES = WORKOUT_STYLES;
