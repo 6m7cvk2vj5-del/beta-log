@@ -1,4 +1,4 @@
-# Chalk Notes (formerly Beta Log)
+# Beta Log
 
 Personal climbing training log + AI workout generator. Standalone static PWA: `index.html` + `app.js` (+ `icon.png`). No backend, no build step.
 
@@ -26,7 +26,7 @@ Work happens from two places: Mac sessions (this iCloud folder) and phone/cloud 
 
 Whenever asking the user to review a change before it goes to `main`, include a temporary link they can tap to look at it — don't just describe the change or offer a push.
 
-- Build the preview with `python3 tools/make-preview.py <scratchpad dir>`. It strips the page wrappers the Artifact host adds itself, retitles the page "Chalk Notes Preview", and loads `tools/preview-seed.js` (labelled sample entries, only when the preview's storage is empty). Publish the built `index.html` as a private Artifact with the built `app.js` and `seed.js` passed through `files`. Re-publish the same file path on each revision so the link stays the same during a review.
+- Build the preview with `python3 tools/make-preview.py <scratchpad dir>`. It strips the page wrappers the Artifact host adds itself, retitles the page "Beta Log Preview", and loads `tools/preview-seed.js` (labelled sample entries, only when the preview's storage is empty). Publish the built `index.html` as a private Artifact with the built `app.js` and `seed.js` passed through `files`. Re-publish the same file path on each revision so the link stays the same during a review.
 - Put the link directly in the review request, with what changed in a sentence or two and the commit it reflects.
 - Read `index.html` and `app.js` in full before publishing (they are the whole app). Never include an API key.
 - The preview runs on a different origin from the live site, so it never has the real log or API key, and the Artifact sandbox blocks calls to api.anthropic.com. Plan generation, adjust and add-to-log (which calls the API) can't be exercised there; say so and verify those with jsdom instead.
