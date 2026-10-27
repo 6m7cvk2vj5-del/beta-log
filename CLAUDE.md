@@ -63,3 +63,12 @@ Conventions — each came from a real bug:
 - Keep test scripts small and single-purpose, run as separate `node -e` invocations with an explicit timeout. Combined scripts have hung in sandboxed environments. On macOS there is no `timeout`; use `perl -e 'alarm 60; exec @ARGV' node ...`.
 - Before telling the user a change is done: run jsdom checks, then take real Playwright screenshots (mobile viewport, e.g. 390x844, saved to `screenshots/`, which is gitignored) and look at them.
 - `node_modules` in this folder can contain iCloud-evicted ("dataless") files, which makes `require('jsdom')` block indefinitely. If a test hangs on load, install the dev dependencies outside iCloud (copy `package.json` and `package-lock.json` to a scratch dir, `npm ci`, point the loader at that jsdom) instead of touching `node_modules` here.
+
+## Stash (Casey's workflow library: repo `6m7cvk2vj5-del/stash`)
+Before you do any of these, check stash `INDEX.md` for a playbook, and read only the matching row:
+starting a project or restructuring this CLAUDE.md · launching more than one session, worker or scheduled task · setting up a
+branch/merge workflow · asking Casey questions (survey page) · verifying numbers a second way · giving Casey a preview link ·
+hitting or planning around a usage limit · filing uploads/reference docs.
+If stash is not attached, call `add_repo` (owner `6m7cvk2vj5-del`, repo `stash`, `access: "push"`) and then read it.
+If stash has no row for what you need, follow its CLAUDE.md gap rule (log a `REQUESTED` row), tell Casey, and carry on.
+When you learn something a future project would want, add one line to stash `LESSONS.md`.
