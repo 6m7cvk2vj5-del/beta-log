@@ -3667,17 +3667,17 @@ function renderSettings(){
       ${pillsHTML(['3-2-1','4-3-2-1'], s.cycleType, 'setCycleType')}
     </div>
     <div class="field"><label>Cycle start date</label>
-      <input type="date" value="${s.cycleStartDate}" oninput="App.settings.cycleStartDate=this.value">
+      <input type="date" value="${s.cycleStartDate}" oninput="if (this.value) updateSetting('cycleStartDate', this.value)">
     </div>
     <div class="field"><label>Climbing sessions per week, at least</label>
-      <input type="number" inputmode="numeric" min="1" max="7" value="${s.minClimbs || 2}" oninput="App.settings.minClimbs = Math.max(1, Math.min(7, Number(this.value) || 2))">
+      <input type="number" inputmode="numeric" min="1" max="7" value="${s.minClimbs || 2}" oninput="updateSetting('minClimbs', Math.max(1, Math.min(7, Number(this.value) || 2)))">
     </div>
     <div class="row2">
       <div class="field"><label>Indoor grade</label>
-        <input type="text" placeholder="e.g. 5.10c" value="${escHtml(s.gradeIndoor)}" oninput="App.settings.gradeIndoor=this.value">
+        <input type="text" placeholder="e.g. 5.10c" value="${escHtml(s.gradeIndoor)}" oninput="updateSetting('gradeIndoor', this.value)">
       </div>
       <div class="field"><label>Outdoor grade</label>
-        <input type="text" placeholder="e.g. 5.10a" value="${escHtml(s.gradeOutdoor)}" oninput="App.settings.gradeOutdoor=this.value">
+        <input type="text" placeholder="e.g. 5.10a" value="${escHtml(s.gradeOutdoor)}" oninput="updateSetting('gradeOutdoor', this.value)">
       </div>
     </div>
     <button class="btn btn-secondary" style="margin-bottom:8px;" onclick="openQuestionnaire()">Profile check-in (6 questions)</button>
@@ -3722,7 +3722,7 @@ function renderSettings(){
     "Export downloads a JSON file of your entries and check-ins (API key excluded). Import reads one back in and merges it with what's already here — nothing gets overwritten, so it's safe to import an old backup after switching phones.")}
   <div class="card">
     <h2>Anthropic API key${infoIcon("Stored only in this browser's local storage. Never written into this app's code, never sent anywhere but Anthropic's API.")}</h2>
-    <div class="field"><input type="password" placeholder="sk-ant-..." value="${escHtml(s.apiKey)}" oninput="App.settings.apiKey=this.value"></div>
+    <div class="field"><input type="password" placeholder="sk-ant-..." value="${escHtml(s.apiKey)}" oninput="updateSetting('apiKey', this.value)"></div>
   </div>
   <button class="btn btn-primary" onclick="saveSettingsForm()">Save settings</button>
   ${renderEntriesAndCheckins()}`;
@@ -3984,7 +3984,11 @@ function toggleEntry(id){ App.ui.expandedEntry = App.ui.expandedEntry === id ? n
 function showMoreEntries(){ App.ui.entriesShown += 50; App.render(); }
 function toggleAssessment(id){ App.ui.expandedAssessment = App.ui.expandedAssessment === id ? null : id; App.render(); }
 
-function setCycleType(t){ App.settings.cycleType = t; App.render(); }
+// Settings persist the moment they change. Before this, the framework pills and the text fields only
+// updated memory and relied on "Save settings" being tapped, so picking 4-3-2-1 and leaving reverted
+// to 3-2-1 on the next load.
+function updateSetting(key, v){ App.settings[key] = v; App.saveSettings(); }
+function setCycleType(t){ updateSetting('cycleType', t); App.render(); }
 function setFontSize(v){ App.settings.fontSize = v.toLowerCase(); App.applyFontSize(); App.saveSettings(); App.render(); }
 function setTheme(v){ App.settings.theme = v.toLowerCase(); App.applyTheme(); App.saveSettings(); App.render(); }
 function setWeeklyGoal(key, v){
@@ -3992,6 +3996,7 @@ function setWeeklyGoal(key, v){
   const n = Number(v);
   if (v === '' || !Number.isFinite(n) || n < 0) delete App.settings.weeklyTargets[key];
   else App.settings.weeklyTargets[key] = Math.round(n);
+  App.saveSettings();
 }
 function resetWeeklyGoals(){
   App.settings.weeklyTargets = {};
@@ -4158,7 +4163,7 @@ window.toggleLogFocus = toggleLogFocus; window.toggleLogWall = toggleLogWall; wi
 window.toggleLogDayType = toggleLogDayType; window.toggleLogFailurePoint = toggleLogFailurePoint;
 window.setClimbLocation = setClimbLocation;
 window.addClimbRow = addClimbRow; window.removeClimbRow = removeClimbRow; window.submitLog = submitLog;
-window.toggleEntry = toggleEntry; window.showMoreEntries = showMoreEntries; window.toggleAssessment = toggleAssessment; window.toggleLagging = toggleLagging; window.setCycleType = setCycleType; window.saveSettingsForm = saveSettingsForm;
+window.toggleEntry = toggleEntry; window.showMoreEntries = showMoreEntries; window.toggleAssessment = toggleAssessment; window.toggleLagging = toggleLagging; window.setCycleType = setCycleType; window.updateSetting = updateSetting; window.saveSettingsForm = saveSettingsForm;
 window.setFontSize = setFontSize; window.adjustLogTime = adjustLogTime; window.setLogTime = setLogTime; window.typeLogTime = typeLogTime;
 window.adjustAskMinutes = adjustAskMinutes; window.setAskMinutes = setAskMinutes; window.typeAskMinutes = typeAskMinutes; window.removeLogTimeField = removeLogTimeField; window.addLogTimeField = addLogTimeField; window.setWeeklyGoal = setWeeklyGoal; window.resetWeeklyGoals = resetWeeklyGoals;
 window.setTheme = setTheme;
