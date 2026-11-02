@@ -1789,7 +1789,7 @@ function planToLogDraft(text){
   fresh.plan = text;
   return { fresh, climbsDraft: [] };
 }
-function openLogWithDraft(fresh, climbsDraft){
+function openLogWithDraft(fresh, climbsDraft, summaryMode){
   App.ui.logDraft = fresh;
   App.ui.climbsDraft = climbsDraft;
   // Surface every bucket that has minutes, same as editing an existing entry — otherwise a second
@@ -1798,8 +1798,8 @@ function openLogWithDraft(fresh, climbsDraft){
   App.ui.logExtraFields = TIME_FIELDS.filter(f => f !== primary && Number(fresh[f]) > 0);
   App.ui.editingId = null;
   App.ui.importLoading = false; // clear before switching tabs, or the new tab renders stuck "loading"
-  App.ui.logSummaryMode = !!fresh.plan;
-  App.toast('Pre-filled from the plan — check and save');
+  App.ui.logSummaryMode = !!fresh.plan || !!summaryMode; // must be set before setTab() renders
+  App.toast(fresh.plan ? 'Pre-filled from the plan — check and save' : 'Copied from an earlier session — check and save');
   App.setTab('log');
 }
 // "Add this to today's log" opens the Log tab pre-filled so it can be glanced over and saved. One
@@ -3441,16 +3441,46 @@ function showFullLogForm(){ App.ui.logSummaryMode = false; App.render(); }
 
 // Shown after "Add this to today's log": what came across from the plan, a few quick questions,
 // and Save. The full form is one tap away for anything that needs changing.
+// Recent distinct sessions (type + minutes), newest first, for one-tap repeats on the Log tab.
+function recentSessionTemplates(){
+  const seen = new Set(), out = [];
+  [...App.entries].sort((a, b) => b.date.localeCompare(a.date)).forEach(e => {
+    if (out.length >= 3 || e.type === 'Rest') return;
+    const mins = TIME_FIELDS.reduce((s, f) => s + (Number(e[f]) || 0), 0);
+    if (!mins) return;
+    const key = e.type + '|' + mins;
+    if (seen.has(key)) return;
+    seen.add(key); out.push({ id: e.id, label: `${e.type} · ${mins} min` });
+  });
+  return out;
+}
+// Copies the shape of an earlier entry into a fresh draft dated today and opens the confirm screen.
+// Feeling resets to 3 and nothing about pain or breakdowns carries over; those are about that day.
+function repeatSession(id){
+  const e = App.entries.find(x => x.id === id);
+  if (!e) return;
+  const fresh = freshLogDraft();
+  ['type','intensity'].forEach(k => { if (e[k]) fresh[k] = e[k]; });
+  TIME_FIELDS.forEach(f => { fresh[f] = Number(e[f]) || 0; });
+  ['dayTypes','focus','workoutStyles','exercisesDone','muscleGroup','coreRegion','coreMovementType'].forEach(k => { fresh[k] = arr(e[k]).slice(); });
+  if (e.powerLevel) fresh.powerLevel = e.powerLevel;
+  fresh.duration = TIME_FIELDS.reduce((s, f) => s + (Number(fresh[f]) || 0), 0);
+  const climbs = arr(e.climbs).map(c => Object.assign({}, c));
+  if (climbs[0] && climbs[0].location) App.ui.climbLocationDraft = climbs[0].location;
+  openLogWithDraft(fresh, climbs, true);
+}
 function renderLogSummary(d){
   const buckets = TIME_FIELDS.filter(f => Number(d[f]) > 0).map(f => `${TIME_BUCKET_LABELS[f]} ${d[f]}`).join(' &middot; ');
+  const climbs = App.ui.climbsDraft.map(c => `${escHtml(c.grade)} &times;${escHtml(c.count)}`).join(', ');
   return `
   <div class="card">
     <h2>Confirm your session</h2>
-    <p class="small muted" style="margin:-4px 0 4px;">From your plan &middot; ${escHtml(d.type)} &middot; ${d.duration} min</p>
-    <p class="small" style="margin:0 0 14px;">${buckets}</p>
+    <p class="small muted" style="margin:-4px 0 4px;">${d.plan ? 'From your plan' : 'Repeated from an earlier session'} &middot; ${escHtml(d.type)} &middot; ${d.duration} min</p>
+    <p class="small" style="margin:0 0 ${climbs ? '4' : '14'}px;">${buckets}</p>
+    ${climbs ? `<p class="small muted" style="margin:0 0 14px;">Climbs: ${climbs}</p>` : ''}
     <div class="field"><label>Date</label><input type="date" value="${d.date}" oninput="App.ui.logDraft.date=this.value"></div>
     <div class="field"><label>How'd it go (1 = flat, 5 = dialed)</label>${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setLogFeeling')}</div>
-    <div class="field"><label>How closely did you follow the plan? (optional)</label>${pillsHTML(ADHERENCE_OPTIONS, d.planAdherence, 'setLogAdherence', {sm:true})}</div>
+    ${d.plan ? `<div class="field"><label>How closely did you follow the plan? (optional)</label>${pillsHTML(ADHERENCE_OPTIONS, d.planAdherence, 'setLogAdherence', {sm:true})}</div>` : ''}
     ${issuesBlock(d, true)}
     <button class="btn btn-primary" onclick="submitLog()">Save entry</button>
     <button class="btn btn-ghost" style="margin-top:8px;" onclick="showFullLogForm()">Edit time and details</button>
@@ -3464,7 +3494,7 @@ function renderLog(){
   const isStrengthLike = d.type === 'Strength' || d.type === 'Antagonist / Stabilizer';
   const isCore = d.type === 'Core Workout';
   const editing = !!App.ui.editingId;
-  if (App.ui.logSummaryMode && d.plan && !editing) return renderLogSummary(d);
+  if (App.ui.logSummaryMode && !editing) return renderLogSummary(d);
   const moreOpen = editing || App.ui.logMoreOpen; // editing an entry always shows everything - nothing already filled in should look like it vanished
 
   // Wall angle, hold types, power level, core movement type and the specific-exercise picker are no
@@ -3493,14 +3523,10 @@ function renderLog(){
   <div class="card">
     ${editing ? `<div class="banner info">Editing an existing entry. <button class="btn btn-ghost" style="width:auto;padding:6px 12px;margin-left:8px;" onclick="cancelEdit()">Cancel edit</button></div>` : ''}
     <h2>${editing ? 'Edit entry' : 'Log a session'}</h2>
-    <div class="row2">
-      <div class="field"><label>Date</label><input type="date" value="${d.date}" oninput="App.ui.logDraft.date=this.value"></div>
-      <div class="field"><label>Type</label>
-        <select onchange="setLogType(this.value)">
-          ${SESSION_TYPE_OPTIONS.concat(['Rest']).map(t=>`<option value="${t}" ${d.type===t?'selected':''}>${t}</option>`).join('')}
-        </select>
-      </div>
-    </div>
+    ${!editing && recentSessionTemplates().length ? `<div class="field"><label>Repeat a recent session</label>
+      <div class="pillrow">${recentSessionTemplates().map(t => `<button type="button" class="pill sm" onclick="repeatSession('${escAttr(t.id)}')">${escHtml(t.label)}</button>`).join('')}</div></div>` : ''}
+    <div class="field"><label>Type</label>${pillsHTML(SESSION_TYPE_OPTIONS.concat(['Rest']), d.type, 'setLogType', {sm:true})}</div>
+    <div class="field"><label>Date</label><input type="date" value="${d.date}" oninput="App.ui.logDraft.date=this.value"></div>
     <div class="field"><label>How'd it go (1 = flat, 5 = dialed)</label>${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setLogFeeling')}</div>
     ${isClimbing ? `
     <div class="field"><label>Climbs done</label>
@@ -4180,6 +4206,6 @@ window.showLastPlan = showLastPlan;
 window.setCatchUp = setCatchUp; window.setFingerDay = setFingerDay; window.computeSessionModel = computeSessionModel; window.toggleAskMore = toggleAskMore; window.applyQuickStart = applyQuickStart; window.setAskStep = setAskStep; window.toggleTimeOther = toggleTimeOther; window.setClimbDiscipline = setClimbDiscipline; window.setClimbPlace = setClimbPlace; window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
 window.toggleMentalFocus = toggleMentalFocus;
 window.sharePlan = sharePlan; window.toggleMobilityFocus = toggleMobilityFocus; window.toLocalISO = toLocalISO;
-window.setRoutineStyle = setRoutineStyle;
+window.setRoutineStyle = setRoutineStyle; window.repeatSession = repeatSession;
 window.tapRadarAxis = tapRadarAxis; window.jumpToAskWithType = jumpToAskWithType; window.jumpToAskWithFocus = jumpToAskWithFocus;
 window.setRadarSlide = setRadarSlide;
