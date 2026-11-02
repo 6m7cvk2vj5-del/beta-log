@@ -845,7 +845,7 @@ const App = {
   lastAsk: null, // the most recent plan request (types, minutes, climbing setup), for the quick-start chips
   lastPlan: null, // the most recently generated plan, persisted so it survives a reload/close
   ui: { tab:'home', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
-        qPairs:null, qPicks:[], benchOpen:false, benchIndex:0, benchDraft:{}, askStep:1, planEditing:false, shareOpen:false, issuesOpen:false, addTypeOpen:false, settingsSections:{}, askMoreOpen:false, timeOther:{}, logSummaryMode:false, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planText:'',
+        qPairs:null, qPicks:[], benchOpen:false, benchIndex:0, benchDraft:{}, askStep:1, planEditing:false, shareOpen:false, issuesOpen:false, addTypeOpen:false, settingsSections:{}, askMoreOpen:false, timeOther:{}, logSummaryMode:false, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planTruncated:false, planText:'',
         editingId:null, planFeedback:'', lastPlanContext:null,
         importLoading:false, importError:'', infoPopup:null, entriesShown:50, streaming:false, logMoreOpen:false, logExtraFields:[], radarData:{}, radarSlide:0, radarSlideCount:1, swapHistory:{},
         timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false, expanded:false },
@@ -1789,7 +1789,7 @@ function planToLogDraft(text){
   fresh.plan = text;
   return { fresh, climbsDraft: [] };
 }
-function openLogWithDraft(fresh, climbsDraft){
+function openLogWithDraft(fresh, climbsDraft, summaryMode){
   App.ui.logDraft = fresh;
   App.ui.climbsDraft = climbsDraft;
   // Surface every bucket that has minutes, same as editing an existing entry — otherwise a second
@@ -1798,8 +1798,8 @@ function openLogWithDraft(fresh, climbsDraft){
   App.ui.logExtraFields = TIME_FIELDS.filter(f => f !== primary && Number(fresh[f]) > 0);
   App.ui.editingId = null;
   App.ui.importLoading = false; // clear before switching tabs, or the new tab renders stuck "loading"
-  App.ui.logSummaryMode = !!fresh.plan;
-  App.toast('Pre-filled from the plan — check and save');
+  App.ui.logSummaryMode = !!fresh.plan || !!summaryMode; // must be set before setTab() renders
+  App.toast(fresh.plan ? 'Pre-filled from the plan — check and save' : 'Copied from an earlier session — check and save');
   App.setTab('log');
 }
 // "Add this to today's log" opens the Log tab pre-filled so it can be glanced over and saved. One
@@ -2137,7 +2137,7 @@ async function askClaude(feedback){
       method:'POST',
       headers: { 'Content-Type':'application/json', 'x-api-key': key, 'anthropic-version':'2023-06-01',
                  'anthropic-dangerous-direct-browser-access':'true' },
-      body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1200, system: sys, messages, stream:true }),
+      body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:PLAN_MAX_TOKENS, system: sys, messages, stream:true }),
       signal: currentStreamController.signal,
     });
     if (!res.ok) {
@@ -2159,7 +2159,8 @@ async function askClaude(feedback){
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = '', text = '';
+    let buffer = '', text = '', stopReason = '';
+    App.ui.planTruncated = false;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -2173,6 +2174,7 @@ async function askClaude(feedback){
         let evt;
         try { evt = JSON.parse(payload); } catch(e) { continue; }
         if (evt.type === 'error') throw new Error((evt.error && evt.error.message) || 'stream error');
+        if (evt.type === 'message_delta' && evt.delta && evt.delta.stop_reason) stopReason = evt.delta.stop_reason;
         if (evt.type === 'content_block_delta' && evt.delta && evt.delta.text) {
           text += evt.delta.text;
           App.ui.planText = text;
@@ -2188,6 +2190,7 @@ async function askClaude(feedback){
       App.render();
       return;
     }
+    App.ui.planTruncated = stopReason === 'max_tokens';
     App.saveLastPlan(text, App.ui.askDraft.sessionTypes, App.ui.lastPlanContext);
     App.render(); // final render swaps the plain streaming text for the full editable card view
   } catch(e) {
@@ -2208,6 +2211,9 @@ async function askClaude(feedback){
   }
 }
 let currentStreamController = null;
+// A full climbing plan is 7-9 sections of named exercises plus the reasoning notes. 1200 tokens cut
+// plans off mid-section; the stream's stop reason is checked so a cut-off is flagged, not silent.
+const PLAN_MAX_TOKENS = 4000;
 function cancelGeneration(){
   if (currentStreamController) currentStreamController.abort();
 }
@@ -2670,25 +2676,6 @@ function renderPlanEditable(text, interactive){
 }
 // One swipeable card per section, then the full editable list below. Read-only here: the
 // controls (reorder, swap, remove) live on the full list so there is one place to edit.
-function renderSectionCarousel(text){
-  const secs = parsePlanSections(text).filter(sec => sec.items.length || sec.plain.length);
-  if (secs.length < 2) return '';
-  const cards = secs.map((sec, i) => {
-    const cat = categorizeSection(sec.title, sec.bucket);
-    return `<div class="section-card" style="border-top-color:var(--cat-${cat})">
-      <div class="section-card-count">${i + 1} of ${secs.length}</div>
-      <div class="section-card-title">${escHtml(sec.title)}${sec.badge ? ` <span class="plan-badge">${escHtml(sec.badge)}</span>` : ''}</div>
-      ${sec.plain.map(p => `<div class="plan-plain">${escHtml(p)}</div>`).join('')}
-      ${sec.items.map(it => `<div class="section-card-item">
-        <div class="exercise-card-name"><span class="ex-link" onclick="openExercise('${escAttr(it.name)}')">${escHtml(it.name)}</span></div>
-        ${it.detail ? `<div class="exercise-card-detail">${escHtml(it.detail)}</div>` : ''}
-        ${howButton(it.name)}
-      </div>`).join('')}
-    </div>`;
-  }).join('');
-  return `<div class="section-carousel" aria-label="Workout sections">${cards}</div>
-    <p class="small muted" style="margin:2px 0 0;">Swipe through the sections, or scroll down for the whole workout.</p>`;
-}
 function togglePlanEditing(){ App.ui.planEditing = !App.ui.planEditing; App.render(); }
 function toggleShareMenu(){ App.ui.shareOpen = !App.ui.shareOpen; App.render(); }
 function toggleLogMore(){ App.ui.logMoreOpen = !App.ui.logMoreOpen; App.render(); }
@@ -2767,17 +2754,12 @@ function renderTimerWidget(){
       </button>
       <button class="btn btn-primary" style="width:auto;padding:9px 16px;flex:none;" id="timerToggleBtn" onclick="toggleTimer()">${t.running ? 'Pause' : (t.remainingSeconds < t.totalSeconds && t.remainingSeconds > 0 ? 'Resume' : 'Start')}</button>
       <button class="btn btn-ghost" style="width:auto;padding:9px 12px;flex:none;" onclick="resetTimer()">Reset</button>
-      <button class="btn btn-ghost" style="width:auto;padding:9px 10px;flex:none;margin-left:auto;" onclick="toggleTimerExpanded()" title="Make bigger">&#x26F6;</button>
+      <button type="button" class="btn btn-ghost sw-chip${sw.running ? ' on' : ''}" id="stopwatchToggleBtn" onclick="toggleStopwatch()" title="Stopwatch: tap to ${sw.running ? 'pause' : 'start'}; reset it from the bigger view">&#9201; <span id="stopwatchNum">${formatMMSS(sw.elapsedSeconds)}</span></button>
+      <button class="btn btn-ghost" style="width:auto;padding:9px 10px;flex:none;margin-left:auto;" onclick="toggleTimerExpanded()" title="Make bigger: stopwatch reset and the full-screen timer">&#x26F6;</button>
     </div>
     ${t.pickerOpen ? `<div class="timer-presets">
       ${TIMER_PRESETS.map(s=>`<button class="pill sm${t.totalSeconds===s?' active':''}" onclick="setTimerPreset(${s})">${formatPresetLabel(s)}</button>`).join('')}
     </div>` : ''}
-    <div class="stopwatch-row">
-      <span class="stopwatch-label">Stopwatch</span>
-      <span id="stopwatchNum" class="stopwatch-num">${formatMMSS(sw.elapsedSeconds)}</span>
-      <button class="btn btn-ghost" style="width:auto;padding:7px 14px;flex:none;" id="stopwatchToggleBtn" onclick="toggleStopwatch()">${sw.running ? 'Pause' : (sw.elapsedSeconds > 0 ? 'Resume' : 'Start')}</button>
-      <button class="btn btn-ghost" style="width:auto;padding:7px 12px;flex:none;" onclick="resetStopwatch()">Reset</button>
-    </div>
   </div>`;
 }
 function renderTimerExpanded(){
@@ -3317,7 +3299,6 @@ function renderPlan(){
     ${renderPlanHero(App.ui.planText, d.sessionTypes, d.minutes)}
     ${getActivePainRegions(App.entries).length ? `<p class="small muted" style="margin:8px 0 0;">Avoiding exercises that load: ${escHtml(getActivePainRegions(App.entries).join(', '))} (flagged in your last log). Swaps skip them too.</p>` : ''}
     ${renderTimerWidget()}
-    ${renderSectionCarousel(App.ui.planText)}
     <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 6px;">
       <span class="small muted" style="text-transform:uppercase;letter-spacing:.4px;">Whole workout</span>
       <button type="button" class="pill sm${App.ui.planEditing ? ' active' : ''}" onclick="togglePlanEditing()">${App.ui.planEditing ? 'Done editing' : 'Edit workout'}</button>
@@ -3333,6 +3314,7 @@ function renderPlan(){
     </div>
     <p class="small muted" style="margin-top:6px;">Share / copy text goes into Notes, Messages or email. The image is a flat picture; links work only in Open as page.</p>` : ''}
     ${App.ui.importError ? `<p class="small" style="color:var(--red);margin-top:6px;">${escHtml(App.ui.importError)}</p>` : ''}
+    ${App.ui.planTruncated ? `<p class="small" style="color:var(--red);margin:12px 0 0;">This plan was cut off before the end. Use "Regenerate" below (add a note like "keep it shorter") to get a complete one.</p>` : ''}
     <div class="field" style="margin-top:12px;">
       <label>Want to adjust this?</label>
       <textarea class="autogrow" placeholder="e.g. swap the finger work for more core, I only actually have 30 min, less bouldering today..." oninput="App.ui.planFeedback=this.value; autoGrow(this); document.getElementById('regenBtn').disabled = !this.value.trim();">${escHtml(App.ui.planFeedback)}</textarea>
@@ -3441,16 +3423,46 @@ function showFullLogForm(){ App.ui.logSummaryMode = false; App.render(); }
 
 // Shown after "Add this to today's log": what came across from the plan, a few quick questions,
 // and Save. The full form is one tap away for anything that needs changing.
+// Recent distinct sessions (type + minutes), newest first, for one-tap repeats on the Log tab.
+function recentSessionTemplates(){
+  const seen = new Set(), out = [];
+  [...App.entries].sort((a, b) => b.date.localeCompare(a.date)).forEach(e => {
+    if (out.length >= 3 || e.type === 'Rest') return;
+    const mins = TIME_FIELDS.reduce((s, f) => s + (Number(e[f]) || 0), 0);
+    if (!mins) return;
+    const key = e.type + '|' + mins;
+    if (seen.has(key)) return;
+    seen.add(key); out.push({ id: e.id, label: `${e.type} · ${mins} min` });
+  });
+  return out;
+}
+// Copies the shape of an earlier entry into a fresh draft dated today and opens the confirm screen.
+// Feeling resets to 3 and nothing about pain or breakdowns carries over; those are about that day.
+function repeatSession(id){
+  const e = App.entries.find(x => x.id === id);
+  if (!e) return;
+  const fresh = freshLogDraft();
+  ['type','intensity'].forEach(k => { if (e[k]) fresh[k] = e[k]; });
+  TIME_FIELDS.forEach(f => { fresh[f] = Number(e[f]) || 0; });
+  ['dayTypes','focus','workoutStyles','exercisesDone','muscleGroup','coreRegion','coreMovementType'].forEach(k => { fresh[k] = arr(e[k]).slice(); });
+  if (e.powerLevel) fresh.powerLevel = e.powerLevel;
+  fresh.duration = TIME_FIELDS.reduce((s, f) => s + (Number(fresh[f]) || 0), 0);
+  const climbs = arr(e.climbs).map(c => Object.assign({}, c));
+  if (climbs[0] && climbs[0].location) App.ui.climbLocationDraft = climbs[0].location;
+  openLogWithDraft(fresh, climbs, true);
+}
 function renderLogSummary(d){
   const buckets = TIME_FIELDS.filter(f => Number(d[f]) > 0).map(f => `${TIME_BUCKET_LABELS[f]} ${d[f]}`).join(' &middot; ');
+  const climbs = App.ui.climbsDraft.map(c => `${escHtml(c.grade)} &times;${escHtml(c.count)}`).join(', ');
   return `
   <div class="card">
     <h2>Confirm your session</h2>
-    <p class="small muted" style="margin:-4px 0 4px;">From your plan &middot; ${escHtml(d.type)} &middot; ${d.duration} min</p>
-    <p class="small" style="margin:0 0 14px;">${buckets}</p>
+    <p class="small muted" style="margin:-4px 0 4px;">${d.plan ? 'From your plan' : 'Repeated from an earlier session'} &middot; ${escHtml(d.type)} &middot; ${d.duration} min</p>
+    <p class="small" style="margin:0 0 ${climbs ? '4' : '14'}px;">${buckets}</p>
+    ${climbs ? `<p class="small muted" style="margin:0 0 14px;">Climbs: ${climbs}</p>` : ''}
     <div class="field"><label>Date</label><input type="date" value="${d.date}" oninput="App.ui.logDraft.date=this.value"></div>
     <div class="field"><label>How'd it go (1 = flat, 5 = dialed)</label>${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setLogFeeling')}</div>
-    <div class="field"><label>How closely did you follow the plan? (optional)</label>${pillsHTML(ADHERENCE_OPTIONS, d.planAdherence, 'setLogAdherence', {sm:true})}</div>
+    ${d.plan ? `<div class="field"><label>How closely did you follow the plan? (optional)</label>${pillsHTML(ADHERENCE_OPTIONS, d.planAdherence, 'setLogAdherence', {sm:true})}</div>` : ''}
     ${issuesBlock(d, true)}
     <button class="btn btn-primary" onclick="submitLog()">Save entry</button>
     <button class="btn btn-ghost" style="margin-top:8px;" onclick="showFullLogForm()">Edit time and details</button>
@@ -3464,7 +3476,7 @@ function renderLog(){
   const isStrengthLike = d.type === 'Strength' || d.type === 'Antagonist / Stabilizer';
   const isCore = d.type === 'Core Workout';
   const editing = !!App.ui.editingId;
-  if (App.ui.logSummaryMode && d.plan && !editing) return renderLogSummary(d);
+  if (App.ui.logSummaryMode && !editing) return renderLogSummary(d);
   const moreOpen = editing || App.ui.logMoreOpen; // editing an entry always shows everything - nothing already filled in should look like it vanished
 
   // Wall angle, hold types, power level, core movement type and the specific-exercise picker are no
@@ -3493,14 +3505,10 @@ function renderLog(){
   <div class="card">
     ${editing ? `<div class="banner info">Editing an existing entry. <button class="btn btn-ghost" style="width:auto;padding:6px 12px;margin-left:8px;" onclick="cancelEdit()">Cancel edit</button></div>` : ''}
     <h2>${editing ? 'Edit entry' : 'Log a session'}</h2>
-    <div class="row2">
-      <div class="field"><label>Date</label><input type="date" value="${d.date}" oninput="App.ui.logDraft.date=this.value"></div>
-      <div class="field"><label>Type</label>
-        <select onchange="setLogType(this.value)">
-          ${SESSION_TYPE_OPTIONS.concat(['Rest']).map(t=>`<option value="${t}" ${d.type===t?'selected':''}>${t}</option>`).join('')}
-        </select>
-      </div>
-    </div>
+    ${!editing && recentSessionTemplates().length ? `<div class="field"><label>Repeat a recent session</label>
+      <div class="pillrow">${recentSessionTemplates().map(t => `<button type="button" class="pill sm" onclick="repeatSession('${escAttr(t.id)}')">${escHtml(t.label)}</button>`).join('')}</div></div>` : ''}
+    <div class="field"><label>Type</label>${pillsHTML(SESSION_TYPE_OPTIONS.concat(['Rest']), d.type, 'setLogType', {sm:true})}</div>
+    <div class="field"><label>Date</label><input type="date" value="${d.date}" oninput="App.ui.logDraft.date=this.value"></div>
     <div class="field"><label>How'd it go (1 = flat, 5 = dialed)</label>${pillsHTML(FEELING_SCALE.map(f=>String(f.v)), String(d.feeling), 'setLogFeeling')}</div>
     ${isClimbing ? `
     <div class="field"><label>Climbs done</label>
@@ -3667,17 +3675,17 @@ function renderSettings(){
       ${pillsHTML(['3-2-1','4-3-2-1'], s.cycleType, 'setCycleType')}
     </div>
     <div class="field"><label>Cycle start date</label>
-      <input type="date" value="${s.cycleStartDate}" oninput="App.settings.cycleStartDate=this.value">
+      <input type="date" value="${s.cycleStartDate}" oninput="if (this.value) updateSetting('cycleStartDate', this.value)">
     </div>
     <div class="field"><label>Climbing sessions per week, at least</label>
-      <input type="number" inputmode="numeric" min="1" max="7" value="${s.minClimbs || 2}" oninput="App.settings.minClimbs = Math.max(1, Math.min(7, Number(this.value) || 2))">
+      <input type="number" inputmode="numeric" min="1" max="7" value="${s.minClimbs || 2}" oninput="updateSetting('minClimbs', Math.max(1, Math.min(7, Number(this.value) || 2)))">
     </div>
     <div class="row2">
       <div class="field"><label>Indoor grade</label>
-        <input type="text" placeholder="e.g. 5.10c" value="${escHtml(s.gradeIndoor)}" oninput="App.settings.gradeIndoor=this.value">
+        <input type="text" placeholder="e.g. 5.10c" value="${escHtml(s.gradeIndoor)}" oninput="updateSetting('gradeIndoor', this.value)">
       </div>
       <div class="field"><label>Outdoor grade</label>
-        <input type="text" placeholder="e.g. 5.10a" value="${escHtml(s.gradeOutdoor)}" oninput="App.settings.gradeOutdoor=this.value">
+        <input type="text" placeholder="e.g. 5.10a" value="${escHtml(s.gradeOutdoor)}" oninput="updateSetting('gradeOutdoor', this.value)">
       </div>
     </div>
     <button class="btn btn-secondary" style="margin-bottom:8px;" onclick="openQuestionnaire()">Profile check-in (6 questions)</button>
@@ -3722,7 +3730,7 @@ function renderSettings(){
     "Export downloads a JSON file of your entries and check-ins (API key excluded). Import reads one back in and merges it with what's already here — nothing gets overwritten, so it's safe to import an old backup after switching phones.")}
   <div class="card">
     <h2>Anthropic API key${infoIcon("Stored only in this browser's local storage. Never written into this app's code, never sent anywhere but Anthropic's API.")}</h2>
-    <div class="field"><input type="password" placeholder="sk-ant-..." value="${escHtml(s.apiKey)}" oninput="App.settings.apiKey=this.value"></div>
+    <div class="field"><input type="password" placeholder="sk-ant-..." value="${escHtml(s.apiKey)}" oninput="updateSetting('apiKey', this.value)"></div>
   </div>
   <button class="btn btn-primary" onclick="saveSettingsForm()">Save settings</button>
   ${renderEntriesAndCheckins()}`;
@@ -3984,7 +3992,11 @@ function toggleEntry(id){ App.ui.expandedEntry = App.ui.expandedEntry === id ? n
 function showMoreEntries(){ App.ui.entriesShown += 50; App.render(); }
 function toggleAssessment(id){ App.ui.expandedAssessment = App.ui.expandedAssessment === id ? null : id; App.render(); }
 
-function setCycleType(t){ App.settings.cycleType = t; App.render(); }
+// Settings persist the moment they change. Before this, the framework pills and the text fields only
+// updated memory and relied on "Save settings" being tapped, so picking 4-3-2-1 and leaving reverted
+// to 3-2-1 on the next load.
+function updateSetting(key, v){ App.settings[key] = v; App.saveSettings(); }
+function setCycleType(t){ updateSetting('cycleType', t); App.render(); }
 function setFontSize(v){ App.settings.fontSize = v.toLowerCase(); App.applyFontSize(); App.saveSettings(); App.render(); }
 function setTheme(v){ App.settings.theme = v.toLowerCase(); App.applyTheme(); App.saveSettings(); App.render(); }
 function setWeeklyGoal(key, v){
@@ -3992,6 +4004,7 @@ function setWeeklyGoal(key, v){
   const n = Number(v);
   if (v === '' || !Number.isFinite(n) || n < 0) delete App.settings.weeklyTargets[key];
   else App.settings.weeklyTargets[key] = Math.round(n);
+  App.saveSettings();
 }
 function resetWeeklyGoals(){
   App.settings.weeklyTargets = {};
@@ -4095,7 +4108,7 @@ document.addEventListener('visibilitychange', () => {
   panels.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) { startX = null; return; }
     const tag = e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.closest('input,textarea,select,.section-carousel')) { startX = null; return; }
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.closest('input,textarea,select')) { startX = null; return; }
     startX = e.touches[0].clientX;
     startY = e.touches[0].clientY;
     startTime = Date.now();
@@ -4158,7 +4171,7 @@ window.toggleLogFocus = toggleLogFocus; window.toggleLogWall = toggleLogWall; wi
 window.toggleLogDayType = toggleLogDayType; window.toggleLogFailurePoint = toggleLogFailurePoint;
 window.setClimbLocation = setClimbLocation;
 window.addClimbRow = addClimbRow; window.removeClimbRow = removeClimbRow; window.submitLog = submitLog;
-window.toggleEntry = toggleEntry; window.showMoreEntries = showMoreEntries; window.toggleAssessment = toggleAssessment; window.toggleLagging = toggleLagging; window.setCycleType = setCycleType; window.saveSettingsForm = saveSettingsForm;
+window.toggleEntry = toggleEntry; window.showMoreEntries = showMoreEntries; window.toggleAssessment = toggleAssessment; window.toggleLagging = toggleLagging; window.setCycleType = setCycleType; window.updateSetting = updateSetting; window.saveSettingsForm = saveSettingsForm;
 window.setFontSize = setFontSize; window.adjustLogTime = adjustLogTime; window.setLogTime = setLogTime; window.typeLogTime = typeLogTime;
 window.adjustAskMinutes = adjustAskMinutes; window.setAskMinutes = setAskMinutes; window.typeAskMinutes = typeAskMinutes; window.removeLogTimeField = removeLogTimeField; window.addLogTimeField = addLogTimeField; window.setWeeklyGoal = setWeeklyGoal; window.resetWeeklyGoals = resetWeeklyGoals;
 window.setTheme = setTheme;
@@ -4175,6 +4188,6 @@ window.showLastPlan = showLastPlan;
 window.setCatchUp = setCatchUp; window.setFingerDay = setFingerDay; window.computeSessionModel = computeSessionModel; window.toggleAskMore = toggleAskMore; window.applyQuickStart = applyQuickStart; window.setAskStep = setAskStep; window.toggleTimeOther = toggleTimeOther; window.setClimbDiscipline = setClimbDiscipline; window.setClimbPlace = setClimbPlace; window.setSessionStyle = setSessionStyle; window.setDrillCategory = setDrillCategory; window.setLogType = setLogType;
 window.toggleMentalFocus = toggleMentalFocus;
 window.sharePlan = sharePlan; window.toggleMobilityFocus = toggleMobilityFocus; window.toLocalISO = toLocalISO;
-window.setRoutineStyle = setRoutineStyle;
+window.setRoutineStyle = setRoutineStyle; window.repeatSession = repeatSession;
 window.tapRadarAxis = tapRadarAxis; window.jumpToAskWithType = jumpToAskWithType; window.jumpToAskWithFocus = jumpToAskWithFocus;
 window.setRadarSlide = setRadarSlide;
