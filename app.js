@@ -845,7 +845,7 @@ const App = {
   lastAsk: null, // the most recent plan request (types, minutes, climbing setup), for the quick-start chips
   lastPlan: null, // the most recently generated plan, persisted so it survives a reload/close
   ui: { tab:'home', logDraft: freshLogDraft(), climbsDraft: [], climbLocationDraft:'Indoor', askDraft: freshAskDraft(),
-        qPairs:null, qPicks:[], benchOpen:false, benchIndex:0, benchDraft:{}, askStep:1, planEditing:false, shareOpen:false, issuesOpen:false, addTypeOpen:false, settingsSections:{}, askMoreOpen:false, timeOther:{}, logSummaryMode:false, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planText:'',
+        qPairs:null, qPicks:[], benchOpen:false, benchIndex:0, benchDraft:{}, askStep:1, planEditing:false, shareOpen:false, issuesOpen:false, addTypeOpen:false, settingsSections:{}, askMoreOpen:false, timeOther:{}, logSummaryMode:false, qOpen:false, settingsOpen:false, planUnlocked:false, expandedEntry:null, expandedAssessment:null, laggingOpen:false, planLoading:false, planError:'', planTruncated:false, planText:'',
         editingId:null, planFeedback:'', lastPlanContext:null,
         importLoading:false, importError:'', infoPopup:null, entriesShown:50, streaming:false, logMoreOpen:false, logExtraFields:[], radarData:{}, radarSlide:0, radarSlideCount:1, swapHistory:{},
         timer: { totalSeconds:30, remainingSeconds:30, running:false, intervalId:null, pickerOpen:false, expanded:false },
@@ -2137,7 +2137,7 @@ async function askClaude(feedback){
       method:'POST',
       headers: { 'Content-Type':'application/json', 'x-api-key': key, 'anthropic-version':'2023-06-01',
                  'anthropic-dangerous-direct-browser-access':'true' },
-      body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1200, system: sys, messages, stream:true }),
+      body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:PLAN_MAX_TOKENS, system: sys, messages, stream:true }),
       signal: currentStreamController.signal,
     });
     if (!res.ok) {
@@ -2159,7 +2159,8 @@ async function askClaude(feedback){
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = '', text = '';
+    let buffer = '', text = '', stopReason = '';
+    App.ui.planTruncated = false;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -2173,6 +2174,7 @@ async function askClaude(feedback){
         let evt;
         try { evt = JSON.parse(payload); } catch(e) { continue; }
         if (evt.type === 'error') throw new Error((evt.error && evt.error.message) || 'stream error');
+        if (evt.type === 'message_delta' && evt.delta && evt.delta.stop_reason) stopReason = evt.delta.stop_reason;
         if (evt.type === 'content_block_delta' && evt.delta && evt.delta.text) {
           text += evt.delta.text;
           App.ui.planText = text;
@@ -2188,6 +2190,7 @@ async function askClaude(feedback){
       App.render();
       return;
     }
+    App.ui.planTruncated = stopReason === 'max_tokens';
     App.saveLastPlan(text, App.ui.askDraft.sessionTypes, App.ui.lastPlanContext);
     App.render(); // final render swaps the plain streaming text for the full editable card view
   } catch(e) {
@@ -2208,6 +2211,9 @@ async function askClaude(feedback){
   }
 }
 let currentStreamController = null;
+// A full climbing plan is 7-9 sections of named exercises plus the reasoning notes. 1200 tokens cut
+// plans off mid-section; the stream's stop reason is checked so a cut-off is flagged, not silent.
+const PLAN_MAX_TOKENS = 4000;
 function cancelGeneration(){
   if (currentStreamController) currentStreamController.abort();
 }
@@ -2670,25 +2676,6 @@ function renderPlanEditable(text, interactive){
 }
 // One swipeable card per section, then the full editable list below. Read-only here: the
 // controls (reorder, swap, remove) live on the full list so there is one place to edit.
-function renderSectionCarousel(text){
-  const secs = parsePlanSections(text).filter(sec => sec.items.length || sec.plain.length);
-  if (secs.length < 2) return '';
-  const cards = secs.map((sec, i) => {
-    const cat = categorizeSection(sec.title, sec.bucket);
-    return `<div class="section-card" style="border-top-color:var(--cat-${cat})">
-      <div class="section-card-count">${i + 1} of ${secs.length}</div>
-      <div class="section-card-title">${escHtml(sec.title)}${sec.badge ? ` <span class="plan-badge">${escHtml(sec.badge)}</span>` : ''}</div>
-      ${sec.plain.map(p => `<div class="plan-plain">${escHtml(p)}</div>`).join('')}
-      ${sec.items.map(it => `<div class="section-card-item">
-        <div class="exercise-card-name"><span class="ex-link" onclick="openExercise('${escAttr(it.name)}')">${escHtml(it.name)}</span></div>
-        ${it.detail ? `<div class="exercise-card-detail">${escHtml(it.detail)}</div>` : ''}
-        ${howButton(it.name)}
-      </div>`).join('')}
-    </div>`;
-  }).join('');
-  return `<div class="section-carousel" aria-label="Workout sections">${cards}</div>
-    <p class="small muted" style="margin:2px 0 0;">Swipe through the sections, or scroll down for the whole workout.</p>`;
-}
 function togglePlanEditing(){ App.ui.planEditing = !App.ui.planEditing; App.render(); }
 function toggleShareMenu(){ App.ui.shareOpen = !App.ui.shareOpen; App.render(); }
 function toggleLogMore(){ App.ui.logMoreOpen = !App.ui.logMoreOpen; App.render(); }
@@ -2767,17 +2754,12 @@ function renderTimerWidget(){
       </button>
       <button class="btn btn-primary" style="width:auto;padding:9px 16px;flex:none;" id="timerToggleBtn" onclick="toggleTimer()">${t.running ? 'Pause' : (t.remainingSeconds < t.totalSeconds && t.remainingSeconds > 0 ? 'Resume' : 'Start')}</button>
       <button class="btn btn-ghost" style="width:auto;padding:9px 12px;flex:none;" onclick="resetTimer()">Reset</button>
-      <button class="btn btn-ghost" style="width:auto;padding:9px 10px;flex:none;margin-left:auto;" onclick="toggleTimerExpanded()" title="Make bigger">&#x26F6;</button>
+      <button type="button" class="btn btn-ghost sw-chip${sw.running ? ' on' : ''}" id="stopwatchToggleBtn" onclick="toggleStopwatch()" title="Stopwatch: tap to ${sw.running ? 'pause' : 'start'}; reset it from the bigger view">&#9201; <span id="stopwatchNum">${formatMMSS(sw.elapsedSeconds)}</span></button>
+      <button class="btn btn-ghost" style="width:auto;padding:9px 10px;flex:none;margin-left:auto;" onclick="toggleTimerExpanded()" title="Make bigger: stopwatch reset and the full-screen timer">&#x26F6;</button>
     </div>
     ${t.pickerOpen ? `<div class="timer-presets">
       ${TIMER_PRESETS.map(s=>`<button class="pill sm${t.totalSeconds===s?' active':''}" onclick="setTimerPreset(${s})">${formatPresetLabel(s)}</button>`).join('')}
     </div>` : ''}
-    <div class="stopwatch-row">
-      <span class="stopwatch-label">Stopwatch</span>
-      <span id="stopwatchNum" class="stopwatch-num">${formatMMSS(sw.elapsedSeconds)}</span>
-      <button class="btn btn-ghost" style="width:auto;padding:7px 14px;flex:none;" id="stopwatchToggleBtn" onclick="toggleStopwatch()">${sw.running ? 'Pause' : (sw.elapsedSeconds > 0 ? 'Resume' : 'Start')}</button>
-      <button class="btn btn-ghost" style="width:auto;padding:7px 12px;flex:none;" onclick="resetStopwatch()">Reset</button>
-    </div>
   </div>`;
 }
 function renderTimerExpanded(){
@@ -3317,7 +3299,6 @@ function renderPlan(){
     ${renderPlanHero(App.ui.planText, d.sessionTypes, d.minutes)}
     ${getActivePainRegions(App.entries).length ? `<p class="small muted" style="margin:8px 0 0;">Avoiding exercises that load: ${escHtml(getActivePainRegions(App.entries).join(', '))} (flagged in your last log). Swaps skip them too.</p>` : ''}
     ${renderTimerWidget()}
-    ${renderSectionCarousel(App.ui.planText)}
     <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 6px;">
       <span class="small muted" style="text-transform:uppercase;letter-spacing:.4px;">Whole workout</span>
       <button type="button" class="pill sm${App.ui.planEditing ? ' active' : ''}" onclick="togglePlanEditing()">${App.ui.planEditing ? 'Done editing' : 'Edit workout'}</button>
@@ -3333,6 +3314,7 @@ function renderPlan(){
     </div>
     <p class="small muted" style="margin-top:6px;">Share / copy text goes into Notes, Messages or email. The image is a flat picture; links work only in Open as page.</p>` : ''}
     ${App.ui.importError ? `<p class="small" style="color:var(--red);margin-top:6px;">${escHtml(App.ui.importError)}</p>` : ''}
+    ${App.ui.planTruncated ? `<p class="small" style="color:var(--red);margin:12px 0 0;">This plan was cut off before the end. Use "Regenerate" below (add a note like "keep it shorter") to get a complete one.</p>` : ''}
     <div class="field" style="margin-top:12px;">
       <label>Want to adjust this?</label>
       <textarea class="autogrow" placeholder="e.g. swap the finger work for more core, I only actually have 30 min, less bouldering today..." oninput="App.ui.planFeedback=this.value; autoGrow(this); document.getElementById('regenBtn').disabled = !this.value.trim();">${escHtml(App.ui.planFeedback)}</textarea>
@@ -4126,7 +4108,7 @@ document.addEventListener('visibilitychange', () => {
   panels.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) { startX = null; return; }
     const tag = e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.closest('input,textarea,select,.section-carousel')) { startX = null; return; }
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.closest('input,textarea,select')) { startX = null; return; }
     startX = e.touches[0].clientX;
     startY = e.touches[0].clientY;
     startTime = Date.now();
